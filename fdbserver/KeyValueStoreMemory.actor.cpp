@@ -25,6 +25,8 @@
 #include "flow/ActorCollection.h"
 #include "fdbclient/Notified.h"
 #include "fdbclient/SystemData.h"
+#include "fdbclient/CoordinationInterface.h"
+#include "fdbclient/StatusClient.h"
 
 #define OP_DISK_OVERHEAD (sizeof(OpHeader) + 1)
 
@@ -427,7 +429,35 @@ private:
 		return log->push( LiteralStringRef("\x01") ); // Changes here should be reflected in OP_DISK_OVERHEAD
 	}
 
-	ACTOR static Future<Void> recover( KeyValueStoreMemory* self, bool exactRecovery ) {
+	// reset everything and join as an empty node
+	static void join_as_empty(KeyValueStoreMemory* self){
+		self->previousSnapshotEnd = -1;
+		self->currentSnapshotEnd = -1;
+		self->resetSnapshot = false;
+		self->committedWriteBytes = self->committedDataSize = 0;
+		self->transactionSize = 0;
+		self->transactionIsLarge = false;
+		// clear data set and operation queue
+		self->data.clear();
+		self->queue.clear();
+	}
+
+	// check if cluster is healthy, private method used by recovery process
+	ACTOR static Future<bool> is_cluster_healthy(){
+		// TODO: user can specify cluster file name
+		state std::pair<std::string, bool> resolvedClusterFile = ClusterConnectionFile::lookupClusterFileName("");
+		state Reference<ClusterConnectionFile> ccf( new ClusterConnectionFile( resolvedClusterFile.first ) );
+		StatusObject statusObj = wait(StatusClient::statusFetcher(ccf));
+
+		// retrieve cluster healthy status
+		// TODO: which healthy data to be used
+		StatusObjectReader statusObjectReader(statusObj);
+		StatusObjectReader statusObjClient = statusObjectReader["client"].get_obj();
+		StatusObjectReader statusObjClientDatabaseStatus = statusObjClient["database_status"].get_obj();
+		return statusObjClientDatabaseStatus["healthy"].get_bool();
+	}
+
+    ACTOR static Future<Void> recover( KeyValueStoreMemory* self, bool exactRecovery ) {
 		// 'uncommitted' variables track something that might be rolled back by an OpRollback, and are copied into permanent variables
 		// (in self) in OpCommit.  OpRollback does the reverse (copying the permanent versions over the uncommitted versions)
 		// the uncommitted and committed variables should be equal initially (to whatever makes sense if there are no committed transactions recovered)
@@ -546,13 +576,22 @@ private:
 				}
 
 				if (loggingDelay.isReady()) {
+					state bool isHealthy = wait(is_cluster_healthy());
 					TraceEvent("KVSMemRecoveryLogSnap", self->id)
+					    .detail("IsHealthy", isHealthy)
 						.detail("SnapshotItems", dbgSnapshotItemCount)
 						.detail("SnapshotEnd", dbgSnapshotEndCount)
 						.detail("Mutations", dbgMutationCount)
 						.detail("Commits", dbgCommitCount)
 						.detail("EndsAt", self->log->getNextReadLocation());
-					loggingDelay = delay(1.0);
+					if(isHealthy){
+						// if cluster is healthy, reset everything and return as an empty node
+						join_as_empty(self);
+						return Void();
+					} else{
+						loggingDelay = delay(2.0);
+						loggingDelay = delay(2.0);
+					}
 				}
 
 				Void _ = wait( yield() );
