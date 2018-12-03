@@ -41,6 +41,7 @@
 #include "FlowLineNoise.h"
 
 #include <signal.h>
+#include <boost/algorithm/string.hpp>
 
 #ifdef __unixish__
 #include <stdio.h>
@@ -661,6 +662,168 @@ std::string logBackupDR(const char *context, std::map<std::string, std::string> 
 	}
 
 	return outputString;
+}
+
+const static std::string escapeCharacter(const std::string &value) {
+	bool copy = false;
+	std::string temp = "";
+
+	for (size_t i = 0; i < value.size(); ++i) {
+		char c = value[i];
+		if (c == '\\' || c == '"' || c == '\n') {
+			if (!copy) {
+				temp.reserve(value.size() + 1);
+				temp.assign(value, 0, i);
+				copy = true;
+			}
+			if (c == '\\') {
+				temp.append("\\\\");
+			} else if (c == '"') {
+				temp.append("\\\"");
+			} else {
+				temp.append("\\\n");
+			}
+		} else if (copy) {
+			temp.push_back(c);
+		}
+	}
+	return copy ? temp : value;
+}
+
+void static appendTagMap(std::stringstream &out, std::map<std::string, std::string> tags) {
+	if (tags.empty())
+		return;
+
+	std::string quote = "\"";
+	for (auto &tag : tags) {
+		out << " " << quote << escapeCharacter(tag.first) << quote << "=" << quote
+			<< escapeCharacter(tag.second)
+			<< quote;
+	}
+}
+
+static std::string
+metricsToLineData(const std::string &name, double value, long timestamp, const std::string &source,
+				  std::map<std::string, std::string> tags) {
+	/*
+    * Wavefront Metrics Data format
+    * <metricName> <metricValue> [<timestamp>] source=<source> [pointTags]
+    *
+    * Example: "new-york.power.usage 42422 1533531013 source=localhost datacenter=dc1"
+    */
+	if (name.empty()) {
+		throw std::invalid_argument("metrics name can't be empty");
+	}
+	std::string quote = "\"";
+	std::stringstream ss;
+
+	ss << quote << escapeCharacter(name) << quote << " ";
+	ss << value << " ";
+	if (timestamp != -1) {
+		ss << (timestamp / 1000) << " ";
+	}
+	ss << "source=" << quote << escapeCharacter(source) << quote;
+	appendTagMap(ss, tags);
+	ss << "\n";
+
+	return ss.str();
+}
+
+void serializeJsonObj(StatusObjectReader &payload, const std::string &source,
+					  std::map<std::string, std::string> tags, std::string path=""){
+	char separator = '.';
+	path = (path[0] == '.') ? path.substr(1) : path;
+
+	for (auto &item : payload.obj()) {
+		std::string key = item.first;
+
+		if(item.second.type() == json_spirit::obj_type){
+			if ((path == "cluster.processes"  || path == "cluster.machines") && tags.empty()){
+				auto dic = item.second.get_obj();
+				if(dic.find("address") != dic.end()){
+					tags["address"] = dic.find("address")->second.get_str();
+					dic.erase(dic.find("address"));
+				}
+				if(dic.find("machine_id") != dic.end()){
+					tags["machine_id"] = dic.find("machine_id")->second.get_str();
+					dic.erase(dic.find("machine_id"));
+				}
+				if(path == "cluster.processes"){
+					tags["process_id"] = key;
+					// extract port info
+					std::vector<std::string> address;
+					boost::split(address, tags["address"], boost::is_any_of(":"));
+					if(address.size() == 2){
+						tags["address"] = address[0];
+						path += separator + address[1];
+					}
+				}
+				JSONDoc newPayload(dic);
+				serializeJsonObj(newPayload, source, tags, path);
+			} else{
+				JSONDoc newPayload(item.second);
+				serializeJsonObj(newPayload, source, tags, path + separator + key);
+			}
+
+		} else if(item.second.type() == json_spirit::array_type && key == "roles"){
+			for(auto &element : item.second.get_array()) {
+				if(element.type() != json_spirit::obj_type)
+					continue;
+				auto dic = element.get_obj();
+				// iterate through each role
+				if(dic.find("id") != dic.end()){
+					tags["rule_id"] = dic.find("id")->second.get_str();
+					dic.erase(dic.find("id"));
+				}
+				std::string role = "role.";
+				if(dic.find("role") != dic.end()) {
+					role += dic.find("role")->second.get_str();
+					dic.erase(dic.find("role"));
+				}
+				// create a metric where name is role and value is 1.0
+				// e.g "cluster.processes.4689.role.master" "1.000000"
+				std::string metric =
+						metricsToLineData(path + separator + role, 1.0, -1, source, tags);
+				printf("%s\n", metric.c_str());
+
+				JSONDoc newPayload(dic);
+				serializeJsonObj(newPayload, source, tags, path + separator + role);
+			}
+		} else {
+			// metric name
+			std::string name = path + separator + key;
+			// value
+			double value = 0.0;
+			if(item.second.type() == json_spirit::bool_type){
+				value = item.second.get_bool() ? 1.0 : 0.0;
+			} else if(item.second.type() == json_spirit::int_type){
+				value = item.second.get_int64();
+			} else if(item.second.type() == json_spirit::real_type){
+				value = item.second.get_real();
+			} else {
+				// if value is a string, then continue
+				continue;
+			}
+
+			std::string metric = metricsToLineData(name, value, -1, source, tags);
+			printf("%s\n", metric.c_str());
+		}
+
+	}
+}
+
+void sendMetricsToWavefront(StatusObjectReader statusObj){
+	// generate tags map and hostname
+	std::map<std::string, std::string> tags;
+	std::string source;
+	char hostname[512];
+	if(gethostname(hostname, 512) < 0){
+		source = "fdbservice";
+	} else {
+		source.assign(hostname);
+	}
+
+	serializeJsonObj(statusObj, source, tags);
 }
 
 void printStatus(StatusObjectReader statusObj, StatusClient::StatusLevel level, bool displayDatabaseAvailable = true, bool hideErrorMessages = false) {
@@ -1416,6 +1579,11 @@ void printStatus(StatusObjectReader statusObj, StatusClient::StatusLevel level, 
 		// status JSON
 		else if (level == StatusClient::JSON) {
 			printf("%s\n", json_spirit::write_string(json_spirit::mValue(statusObj.obj()), json_spirit::Output_options::pretty_print).c_str());
+		}
+
+		// status WAVEFRONT, send metric to wavefront server
+		else if (level == StatusClient::WAVEFRONT) {
+			sendMetricsToWavefront(statusObj);
 		}
 	}
 	catch (Error &e){
@@ -2586,6 +2754,8 @@ ACTOR Future<int> cli(CLIOptions opt, LineNoise* plinenoise) {
 						level = StatusClient::MINIMAL;
 					else if (tokens.size() == 2 && tokencmp(tokens[1], "json"))
 						level = StatusClient::JSON;
+					else if (tokens.size() == 2 && tokencmp(tokens[1], "wavefront"))
+						level = StatusClient::WAVEFRONT;
 					else {
 						printUsage(tokens[0]);
 						is_error = true;

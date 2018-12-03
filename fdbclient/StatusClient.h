@@ -26,7 +26,7 @@
 
 class StatusClient {
 public:
-	enum StatusLevel { MINIMAL = 0, NORMAL = 1, DETAILED = 2, JSON = 3 };
+	enum StatusLevel { MINIMAL = 0, NORMAL = 1, DETAILED = 2, JSON = 3, WAVEFRONT = 4 };
 	static Future<StatusObject> statusFetcher(Reference<ClusterConnectionFile> clusterFile);
 };
 
