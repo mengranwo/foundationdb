@@ -711,9 +711,6 @@ metricsToLineData(const std::string &name, double value, long timestamp, const s
     *
     * Example: "new-york.power.usage 42422 1533531013 source=localhost datacenter=dc1"
     */
-	if (name.empty()) {
-		throw std::invalid_argument("metrics name can't be empty");
-	}
 	std::string quote = "\"";
 	std::stringstream ss;
 
@@ -738,7 +735,7 @@ void serializeJsonObj(StatusObjectReader &payload, const std::string &source,
 		std::string key = item.first;
 
 		if(item.second.type() == json_spirit::obj_type){
-			if ((path == "cluster.processes"  || path == "cluster.machines") && tags.empty()){
+			if ((path == "cluster.processes"  || path == "cluster.machines")){
 				auto dic = item.second.get_obj();
 				if(dic.find("address") != dic.end()){
 					tags["address"] = dic.find("address")->second.get_str();
@@ -748,23 +745,24 @@ void serializeJsonObj(StatusObjectReader &payload, const std::string &source,
 					tags["machine_id"] = dic.find("machine_id")->second.get_str();
 					dic.erase(dic.find("machine_id"));
 				}
+                JSONDoc newPayload(dic);
 				if(path == "cluster.processes"){
 					tags["process_id"] = key;
 					// extract port info
 					std::vector<std::string> address;
 					boost::split(address, tags["address"], boost::is_any_of(":"));
-					if(address.size() == 2){
-						tags["address"] = address[0];
-						path += separator + address[1];
-					}
+                    tags["address"] = address[0];
+                    serializeJsonObj(newPayload, source, tags, path + separator + address[1]);
+				} else if (path == "cluster.machines" && tags["machine_id"] == key){
+				    // don't include machine_id inside metric name
+					serializeJsonObj(newPayload, source, tags, path);
+				} else {
+					serializeJsonObj(newPayload, source, tags, path + separator + key);
 				}
-				JSONDoc newPayload(dic);
-				serializeJsonObj(newPayload, source, tags, path);
-			} else{
+			} else {
 				JSONDoc newPayload(item.second);
 				serializeJsonObj(newPayload, source, tags, path + separator + key);
 			}
-
 		} else if(item.second.type() == json_spirit::array_type && key == "roles"){
 			for(auto &element : item.second.get_array()) {
 				if(element.type() != json_spirit::obj_type)
