@@ -778,7 +778,7 @@ void serializeJsonObj(StatusObjectReader &payload, const std::string &source,
 					role += dic.find("role")->second.get_str();
 					dic.erase(dic.find("role"));
 				}
-				// create a metric where name is role and value is 1.0
+				// create a metric where name is its role and value is 1.0
 				// e.g "cluster.processes.4689.role.master" "1.000000"
 				std::string metric =
 						metricsToLineData(path + separator + role, 1.0, -1, source, tags);
