@@ -745,14 +745,14 @@ void serializeJsonObj(StatusObjectReader &payload, const std::string &source,
 					tags["machine_id"] = dic.find("machine_id")->second.get_str();
 					dic.erase(dic.find("machine_id"));
 				}
-                JSONDoc newPayload(dic);
+				JSONDoc newPayload(dic);
 				if(path == "cluster.processes"){
 					tags["process_id"] = key;
 					// extract port info
 					std::vector<std::string> address;
 					boost::split(address, tags["address"], boost::is_any_of(":"));
-                    tags["address"] = address[0];
-                    serializeJsonObj(newPayload, source, tags, path + separator + address[1]);
+					tags["address"] = address[0];
+					serializeJsonObj(newPayload, source, tags, path + separator + address[1]);
 				} else if (path == "cluster.machines" && tags["machine_id"] == key){
 				    // don't include machine_id inside metric name
 					serializeJsonObj(newPayload, source, tags, path);
@@ -780,8 +780,7 @@ void serializeJsonObj(StatusObjectReader &payload, const std::string &source,
 				}
 				// create a metric where name is its role and value is 1.0
 				// e.g "cluster.processes.4689.role.master" "1.000000"
-				std::string metric =
-						metricsToLineData(path + separator + role, 1.0, -1, source, tags);
+				std::string metric = metricsToLineData(path + separator + role, 1.0, -1, source, tags);
 				printf("%s\n", metric.c_str());
 
 				JSONDoc newPayload(dic);
