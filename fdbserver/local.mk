@@ -30,7 +30,7 @@ ifeq ($(PLATFORM),linux)
   fdbserver_LDFLAGS += -static-libstdc++ -static-libgcc
 
   # GPerfTools profiler (uncomment to use)
-  # fdbserver_CFLAGS += -I/opt/gperftools/include -DUSE_GPERFTOOLS=1
+  # fdbserver_CFLAGS += -I/opt/gperftools/include -DUSE_GPERFTOOLS=1 -fno-builtin-malloc -fno-builtin-calloc -fno-builtin-realloc -fno-builtin-free
   # fdbserver_LDFLAGS += -L/opt/gperftools/lib
   # fdbserver_STATIC_LIBS += -ltcmalloc -lunwind -lprofiler
 else ifeq ($(PLATFORM),osx)

@@ -249,6 +249,8 @@ StatusObject DatabaseConfiguration::toJSON(bool noPolicies) const {
 			result["storage_engine"] = "ssd-2";
 		} else if( tLogDataStoreType == KeyValueStoreType::MEMORY && storageServerStoreType == KeyValueStoreType::MEMORY ) {
 			result["storage_engine"] = "memory";
+		} else if( tLogDataStoreType == KeyValueStoreType::MEMORY && storageServerStoreType == KeyValueStoreType::MEMORY_RADIXTREE ) {
+            result["storage_engine"] = "memory-radixtree";
 		}
 
 		if( remoteTLogReplicationFactor == 1 ) {
@@ -362,9 +364,18 @@ bool DatabaseConfiguration::setInternal(KeyRef key, ValueRef value) {
 	else if (ck == LiteralStringRef("log_replicas")) parse(&tLogReplicationFactor, value);
 	else if (ck == LiteralStringRef("log_anti_quorum")) parse(&tLogWriteAntiQuorum, value);
 	else if (ck == LiteralStringRef("storage_replicas")) parse(&storageTeamSize, value);
-	else if (ck == LiteralStringRef("log_engine")) { parse((&type), value); tLogDataStoreType = (KeyValueStoreType::StoreType)type; }
-	else if (ck == LiteralStringRef("storage_engine")) { parse((&type), value); storageServerStoreType = (KeyValueStoreType::StoreType)type; }
-	else if (ck == LiteralStringRef("auto_proxies")) parse(&autoMasterProxyCount, value);
+	else if (ck == LiteralStringRef("log_engine")) {
+		parse((&type), value);
+		tLogDataStoreType = (KeyValueStoreType::StoreType)type;
+		// TODO:  Remove this once memroy radix tree works as a log engine
+		if(tLogDataStoreType == KeyValueStoreType::MEMORY_RADIXTREE) {
+			tLogDataStoreType = KeyValueStoreType::MEMORY;
+		}
+	} else if (ck == LiteralStringRef("storage_engine")) {
+		parse((&type), value);
+		storageServerStoreType = (KeyValueStoreType::StoreType)type;
+	} else if (ck == LiteralStringRef("auto_proxies"))
+		parse(&autoMasterProxyCount, value);
 	else if (ck == LiteralStringRef("auto_resolvers")) parse(&autoResolverCount, value);
 	else if (ck == LiteralStringRef("auto_logs")) parse(&autoDesiredTLogCount, value);
 	else if (ck == LiteralStringRef("storage_replication_policy")) parseReplicationPolicy(&storagePolicy, value);

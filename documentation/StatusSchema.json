@@ -42,6 +42,8 @@
                   "kvstore_available_bytes":12341234,
                   "kvstore_free_bytes":12341234,
                   "kvstore_total_bytes":12341234,
+                  "kvstore_total_size":12341234,
+                  "kvstore_total_nodes":12341234,
                   "durable_bytes":{  
                      "hz":0.0,
                      "counter":0,

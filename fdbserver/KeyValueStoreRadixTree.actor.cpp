@@ -1,5 +1,5 @@
 /*
- * KeyValueStoreMemory.actor.cpp
+ * KeyValueStoreRadixTree.actor.cpp
  *
  * This source file is part of the FoundationDB open source project
  *
@@ -21,59 +21,46 @@
 #include "flow/actorcompiler.h"
 #include "IKeyValueStore.h"
 #include "IDiskQueue.h"
-#include "flow/IndexedSet.h"
+#include "flow/RadixTree.h"
 #include "flow/ActorCollection.h"
 #include "fdbclient/Notified.h"
 #include "fdbclient/SystemData.h"
 
 #define OP_DISK_OVERHEAD (sizeof(OpHeader) + 1)
 
-//Stored in the IndexedSets that hold the database.
-//Each KeyValueMapPair is 32 bytes, excluding arena memory.
-//It is stored in an IndexedSet<KeyValueMapPair, uint64_t>::Node, for a total size of 72 bytes.
-struct KeyValueMapPair {
-	Arena arena; //8 Bytes (excluding arena memory)
-	KeyRef key; //12 Bytes
-	ValueRef value; //12 Bytes
-
-	void operator= ( KeyValueMapPair const& rhs ) { arena = rhs.arena; key = rhs.key; value = rhs.value; }
-	KeyValueMapPair( KeyValueMapPair const& rhs ) : arena(rhs.arena), key(rhs.key), value(rhs.value) {}
-
-	KeyValueMapPair(KeyRef key, ValueRef value) : arena(key.expectedSize() + value.expectedSize()), key(arena, key), value(arena, value) { }
-
-	bool operator<(KeyValueMapPair const& r) const { return key < r.key; }
-	bool operator==(KeyValueMapPair const& r) const { return key == r.key; }
-	bool operator!=(KeyValueMapPair const& r) const { return key != r.key; }
-};
-
-template <class CompatibleWithKey>
-bool operator<(KeyValueMapPair const& l, CompatibleWithKey const& r) { return l.key < r; }
-
-template <class CompatibleWithKey>
-bool operator<(CompatibleWithKey const& l, KeyValueMapPair const& r) { return l < r.key; }
-
 extern bool noUnseed;
 
-class KeyValueStoreMemory : public IKeyValueStore, NonCopyable {
+class KeyValueStoreRadixTree : public IKeyValueStore, NonCopyable {
 public:
-	KeyValueStoreMemory( IDiskQueue* log, UID id, int64_t memoryLimit, bool disableSnapshot, bool replaceContent, bool exactRecovery );
+	KeyValueStoreRadixTree( IDiskQueue* log, UID id, int64_t memoryLimit, bool disableSnapshot, bool replaceContent, bool exactRecovery );
 
 	// IClosable
 	virtual Future<Void> getError() { return log->getError(); }
 	virtual Future<Void> onClosed() { return log->onClosed(); }
-	virtual void dispose() { recovering.cancel(); log->dispose(); delete this; }
-	virtual void close() { recovering.cancel(); log->close(); delete this; }
+	virtual void dispose() {
+		recovering.cancel();
+		log->dispose();
+		data.clear();
+		delete reserved_buffer;
+		delete this;
+	}
+	virtual void close() {
+		recovering.cancel();
+		log->close();
+		data.clear();
+		delete reserved_buffer;
+		delete this;
+	}
 
 	// IKeyValueStore
-	virtual KeyValueStoreType getType() { return KeyValueStoreType::MEMORY; }
+	virtual KeyValueStoreType getType() { return KeyValueStoreType::MEMORY_RADIXTREE; }
 
 	int64_t getAvailableSize() {
 		int64_t residentSize =
-			data.sumTo(data.end()) +
+			data.sum_to(data.end()) +
 			queue.totalSize() +  // doesn't account for overhead in queue
 			transactionSize;
-
-		return memoryLimit - residentSize;
+        return memoryLimit - residentSize;
 	}
 
 	virtual StorageBytes getStorageBytes() {
@@ -88,14 +75,16 @@ public:
 		int64_t totalSize = std::min(memoryLimit, diskQueueBytes.total / 4 - uncommittedBytes);
 
 		return StorageBytes(std::max((int64_t)0, freeSize), std::max((int64_t)0, totalSize), diskQueueBytes.used,
-		    std::max((int64_t)0, availableSize));
+		                    std::max((int64_t)0, availableSize));
 	}
+
+	virtual std::tuple<size_t, size_t, size_t> getSize() { return data.size(); }
 
 	void semiCommit() {
 		transactionSize += queue.totalSize();
 		if(transactionSize > 0.5 * committedDataSize) {
 			transactionIsLarge = true;
-			TraceEvent("KVSMemSwitchingToLargeTransactionMode", id).detail("TransactionSize", transactionSize).detail("DataSize", committedDataSize);
+			TraceEvent("KVSRtreeSwitchingToLargeTransactionMode", id).detail("TransactionSize", transactionSize).detail("DataSize", committedDataSize);
 			TEST(true); // KeyValueStoreMemory switching to large transaction mode
 			TEST(committedDataSize > 1e3); // KeyValueStoreMemory switching to large transaction mode with committed data
 		}
@@ -104,14 +93,23 @@ public:
 		committedWriteBytes += bytesWritten;
 	}
 
+	virtual void printData() {
+		printf("radix tree size %lu\n", std::get<0>(data.size()));
+		for (auto it = data.begin(); it != data.end(); ++it) {
+			StringRef key = it.key(reserved_buffer, 10000);
+			printf("key[%s : %d] value[%s : %d]\n", printable(key).c_str(), key.size(), printable(*it).c_str(),
+			       (*it).size());
+		}
+	}
+
 	virtual void set(KeyValueRef keyValue, const Arena* arena) {
 		//A commit that occurs with no available space returns Never, so we can throw out all modifications
 		if(getAvailableSize() <= 0)
 			return;
 
-		if(transactionIsLarge) {
-			KeyValueMapPair pair(keyValue.key, keyValue.value);
-			data.insert(pair, pair.arena.getSize() + data.getElementBytes());
+//		printf("insert: key[%s] value[%s] and larger %d? \n", printable(keyValue.key).c_str(), printable(keyValue.value).c_str(), transactionIsLarge);
+        if(transactionIsLarge) {
+			data.insert(keyValue.key, keyValue.value, true);
 		}
 		else {
 			queue.set(keyValue, arena);
@@ -119,6 +117,7 @@ public:
 				semiCommit();
 			}
 		}
+		//		printf("insert end: tree size[%lu]\n", std::get<0>(data.size()));
 	}
 
 	virtual void clear(KeyRangeRef range, const Arena* arena) {
@@ -135,18 +134,18 @@ public:
 				semiCommit();
 			}
 		}
-	}
+    }
 
 	virtual Future<Void> commit(bool sequential) {
 		if(getAvailableSize() <= 0) {
 			if(g_network->isSimulated()) { //FIXME: known bug in simulation we are supressing
 				int unseed = noUnseed ? 0 : g_random->randomInt(0, 100001);
-				TraceEvent(SevWarnAlways, "KeyValueStoreMemory_OutOfSpace", id);
+				TraceEvent(SevWarnAlways, "KeyValueStoreRadixT_OutOfSpace", id);
 				TraceEvent("ElapsedTime").detail("SimTime", now()).detail("RealTime", 0)
 					.detail("RandomUnseed", unseed);
 				flushAndExit(0);
 			}
-			TraceEvent(SevError, "KeyValueStoreMemory_OutOfSpace", id);
+			TraceEvent(SevError, "KeyValueStoreRadixT_OutOfSpace", id);
 			return Never();
 		}
 
@@ -162,6 +161,7 @@ public:
 
 		if(transactionIsLarge) {
 			fullSnapshot(data);
+
 			resetSnapshot = true;
 			committedWriteBytes = notifiedCommittedWriteBytes.get();
 			overheadWriteBytes = 0;
@@ -185,10 +185,9 @@ public:
 				overheadWriteBytes = log->getCommitOverhead();
 			}
 		}
-
 		auto c = log->commit();
 
-		committedDataSize = data.sumTo(data.end());
+		committedDataSize = data.sum_to(data.end());
 		transactionSize = 0;
 		transactionIsLarge = false;
 		firstCommitWithSnapshot = false;
@@ -203,7 +202,7 @@ public:
 
 		auto it = data.find(key);
 		if (it == data.end()) return Optional<Value>();
-		return Optional<Value>(it->value);
+		return Optional<Value>(*it);
 	}
 
 	virtual Future<Optional<Value>> readValuePrefix( KeyRef key, int maxLength, Optional<UID> debugID = Optional<UID>() ) {
@@ -212,7 +211,7 @@ public:
 
 		auto it = data.find(key);
 		if (it == data.end()) return Optional<Value>();
-		auto val = it->value;
+		auto val = *it;
 		if(maxLength < val.size()) {
 			return Optional<Value>(val.substr(0, maxLength));
 		}
@@ -230,20 +229,24 @@ public:
 		Standalone<VectorRef<KeyValueRef>> result;
 		if (rowLimit >= 0) {
 			auto it = data.lower_bound(keys.begin);
-			while (it!=data.end() && it->key < keys.end && rowLimit && byteLimit>=0) {
-				byteLimit -= sizeof(KeyValueRef) + it->key.size() + it->value.size();
-				result.push_back_deep( result.arena(), KeyValueRef(it->key, it->value) );
+			auto keyStart = it.key(reserved_buffer, 10000);
+			while (it!=data.end() && keyStart < keys.end && rowLimit && byteLimit>=0) {
+				byteLimit -= sizeof(KeyValueRef) + keyStart.size() + (*it).size();
+				result.push_back_deep( result.arena(), KeyValueRef(keyStart, (*it) ));
 				++it;
 				--rowLimit;
+                keyStart = it.key(reserved_buffer, 10000);
 			}
 		} else {
 			rowLimit = -rowLimit;
 			auto it = data.previous( data.lower_bound(keys.end) );
-			while (it!=data.end() && it->key >= keys.begin && rowLimit && byteLimit>=0) {
-				byteLimit -= sizeof(KeyValueRef) + it->key.size() + it->value.size();
-				result.push_back_deep( result.arena(), KeyValueRef(it->key, it->value) );
+            auto keyStart = it.key(reserved_buffer, 10000);
+			while (it!=data.end() && keyStart >= keys.begin && rowLimit && byteLimit>=0) {
+				byteLimit -= sizeof(KeyValueRef) + keyStart.size() + (*it).size();
+				result.push_back_deep( result.arena(), KeyValueRef(keyStart, (*it)) );
 				it = data.previous(it);
 				--rowLimit;
+                keyStart = it.key(reserved_buffer, 10000);
 			}
 		}
 		return result;
@@ -340,7 +343,9 @@ private:
 
 	UID id;
 
-	IndexedSet< KeyValueMapPair, uint64_t > data;
+	radix_tree< StringRef > data;
+	// reserved buffer for snapshot/fullsnapshot
+	uint8_t *reserved_buffer;
 
 	OpQueue queue; // mutations not yet commit()ted
 	IDiskQueue *log;
@@ -365,55 +370,43 @@ private:
 	int snapshotCount;
 
 	int64_t memoryLimit; //The upper limit on the memory used by the store (excluding, possibly, some clear operations)
-	std::vector<std::pair<KeyValueMapPair, uint64_t>> dataSets;
 
 	int64_t commit_queue(OpQueue &ops, bool log, bool sequential = false) {
 		int64_t total = 0, count = 0;
 		IDiskQueue::location log_location = 0;
 
+		// DEBUG : check when sequential equals true
+		ASSERT(!sequential);
+
 		for(auto o = ops.begin(); o != ops.end(); ++o) {
 			++count;
 			total += o->p1.size() + o->p2.size() + OP_DISK_OVERHEAD;
 			if (o->op == OpSet) {
-				KeyValueMapPair pair(o->p1, o->p2);
-				if(sequential) {
-					dataSets.push_back(std::make_pair(pair, pair.arena.getSize() + data.getElementBytes()));
-				} else {
-					data.insert( pair, pair.arena.getSize() + data.getElementBytes() );
-				}
+				data.insert(o->p1, o->p2, true);
+				//				printf("commit_queue : set key[%s] value[%s]\n", o->p1.toString().c_str(),
+				//o->p2.toString().c_str());
 			}
 			else if (o->op == OpClear) {
-				if(sequential) {
-					data.insert(dataSets);
-					dataSets.clear();
-				}
 				data.erase( data.lower_bound(o->p1), data.lower_bound(o->p2) );
 			}
 			else if (o->op == OpClearToEnd) {
-				if(sequential) {
-					data.insert(dataSets);
-					dataSets.clear();
-				}
 				data.erase( data.lower_bound(o->p1), data.end() );
 			}
 			else ASSERT(false);
 			if ( log )
 				log_location = log_op( o->op, o->p1, o->p2 );
 		}
-		if(sequential) {
-			data.insert(dataSets);
-			dataSets.clear();
-		}
 
 		bool ok = count < 1e6;
 		if( !ok ) {
-			TraceEvent(/*ok ? SevInfo : */SevWarnAlways, "KVSMemCommit_queue", id)
+			TraceEvent(/*ok ? SevInfo : */SevWarnAlways, "KVSRadixTreeCommit_queue", id)
 				.detail("Bytes", total)
 				.detail("Log", log)
 				.detail("Ops", count)
 				.detail("LastLoggedLocation", log_location)
 				.detail("Details", count);
 		}
+//		printf("commit_queue end: count[%lld]\n", count);
 
 		ops.clear();
 		return total;
@@ -427,7 +420,7 @@ private:
 		return log->push( LiteralStringRef("\x01") ); // Changes here should be reflected in OP_DISK_OVERHEAD
 	}
 
-	ACTOR static Future<Void> recover( KeyValueStoreMemory* self, bool exactRecovery ) {
+	ACTOR static Future<Void> recover( KeyValueStoreRadixTree* self, bool exactRecovery ) {
 		// 'uncommitted' variables track something that might be rolled back by an OpRollback, and are copied into permanent variables
 		// (in self) in OpCommit.  OpRollback does the reverse (copying the permanent versions over the uncommitted versions)
 		// the uncommitted and committed variables should be equal initially (to whatever makes sense if there are no committed transactions recovered)
@@ -448,7 +441,7 @@ private:
 		state OpQueue recoveryQueue;
 		state OpHeader h;
 
-		TraceEvent("KVSMemRecoveryStarted", self->id)
+		TraceEvent("KVSRadixTreeRecoveryStarted", self->id)
 			.detail("SnapshotEndLocation", uncommittedSnapshotEnd);
 
 		try {
@@ -461,7 +454,7 @@ private:
 						memcpy(&h, data.begin(), data.size());
 						zeroFillSize = sizeof(OpHeader)-data.size() + h.len1 + h.len2 + 1;
 					}
-					TraceEvent("KVSMemRecoveryComplete", self->id)
+					TraceEvent("KVSRadixTreeRecoveryComplete", self->id)
 						.detail("Reason", "Non-header sized data read")
 						.detail("DataSize", data.size())
 						.detail("ZeroFillSize", zeroFillSize)
@@ -473,7 +466,7 @@ private:
 				Standalone<StringRef> data = wait( self->log->readNext( h.len1 + h.len2+1 ) );
 				if (data.size() != h.len1 + h.len2 + 1) {
 					zeroFillSize = h.len1 + h.len2 + 1 - data.size();
-					TraceEvent("KVSMemRecoveryComplete", self->id)
+					TraceEvent("KVSRadixTreeRecoveryComplete", self->id)
 						.detail("Reason", "data specified by header does not exist")
 						.detail("DataSize", data.size())
 						.detail("ZeroFillSize", zeroFillSize)
@@ -500,6 +493,7 @@ private:
 						recoveryQueue.set( KeyValueRef(p1, p2), &data.arena() );
 						uncommittedNextKey = keyAfter(p1);
 						++dbgSnapshotItemCount;
+//						printf("OpSnapshotItem : set key[%s] value[%s] and uncommittedNextKey[%s]\n", p1.toString().c_str(), p2.toString().c_str(), printable(uncommittedNextKey).c_str());
 					} else if (h.op == OpSnapshotEnd || h.op == OpSnapshotAbort) { // snapshot complete
 						TraceEvent("RecSnapshotEnd", self->id)
 							.detail("NextKey", printable(uncommittedNextKey))
@@ -517,11 +511,14 @@ private:
 					} else if (h.op == OpSet) { // set mutation
 						recoveryQueue.set( KeyValueRef(p1,p2), &data.arena() );
 						++dbgMutationCount;
+//						printf("OpSet : set key[%s] value[%s] and dbgMutationCount[%d]\n", p1.toString().c_str(), p2.toString().c_str(), dbgMutationCount);
 					} else if (h.op == OpClear) { // clear mutation
 						recoveryQueue.clear( KeyRangeRef(p1,p2), &data.arena() );
 						++dbgMutationCount;
+//						printf("OpClear\n");
 					} else if (h.op == OpClearToEnd) { //clear all data from begin key to end
 						recoveryQueue.clear_to_end( p1, &data.arena() );
+//						printf("OpClearToEnd[%s]\n", p1.toString().c_str());
 					} else if (h.op == OpCommit) { // commit previous transaction
 						self->commit_queue(recoveryQueue, false);
 						++dbgCommitCount;
@@ -530,7 +527,7 @@ private:
 						self->currentSnapshotEnd = uncommittedSnapshotEnd;
 					} else if (h.op == OpRollback) { // rollback previous transaction
 						recoveryQueue.rollback();
-						TraceEvent("KVSMemRecSnapshotRollback", self->id)
+						TraceEvent("KVSRadixTreeRecSnapshotRollback", self->id)
 							.detail("NextKey", printable(uncommittedNextKey));
 						uncommittedNextKey = self->recoveredSnapshotKey;
 						uncommittedPrevSnapshotEnd = self->previousSnapshotEnd;
@@ -538,7 +535,7 @@ private:
 					} else
 						ASSERT(false);
 				} else {
-					TraceEvent("KVSMemRecoverySkippedZeroFill", self->id)
+					TraceEvent("KVSRadixTreeRecoverySkippedZeroFill", self->id)
 						.detail("PayloadSize", data.size())
 						.detail("ExpectedSize", h.len1 + h.len2 + 1)
 						.detail("OpCode", h.op)
@@ -546,7 +543,7 @@ private:
 				}
 
 				if (loggingDelay.isReady()) {
-					TraceEvent("KVSMemRecoveryLogSnap", self->id)
+					TraceEvent("KVSRadixTreeRecoveryLogSnap", self->id)
 						.detail("SnapshotItems", dbgSnapshotItemCount)
 						.detail("SnapshotEnd", dbgSnapshotEndCount)
 						.detail("Mutations", dbgMutationCount)
@@ -560,7 +557,7 @@ private:
 
 			if (zeroFillSize) {
 				if( exactRecovery ) {
-					TraceEvent(SevError, "KVSMemExpectedExact", self->id);
+					TraceEvent(SevError, "KVSRadixTreeExpectedExact", self->id);
 					ASSERT(false);
 				}
 
@@ -573,9 +570,9 @@ private:
 			// make sure that before any new operations are added to the log that all uncommitted operations are "rolled back"
 			self->log_op( OpRollback, StringRef(), StringRef() );  // rollback previous transaction
 
-			self->committedDataSize = self->data.sumTo(self->data.end());
+			self->committedDataSize = self->data.sum_to(self->data.end());
 
-			TraceEvent("KVSMemRecovered", self->id)
+			TraceEvent("KVSRadixTreeRecovered", self->id)
 				.detail("SnapshotItems", dbgSnapshotItemCount)
 				.detail("SnapshotEnd", dbgSnapshotEndCount)
 				.detail("Mutations", dbgMutationCount)
@@ -592,7 +589,7 @@ private:
 	}
 
 	//Snapshots an entire data set
-	void fullSnapshot( IndexedSet< KeyValueMapPair, uint64_t> &snapshotData ) {
+	void fullSnapshot( radix_tree< StringRef> &snapshotData ) {
 		previousSnapshotEnd = log_op(OpSnapshotAbort, StringRef(), StringRef());
 		replaceContent = false;
 
@@ -602,8 +599,9 @@ private:
 		int count = 0;
 		int64_t snapshotSize = 0;
 		for(auto kv = snapshotData.begin(); kv != snapshotData.end(); ++kv) {
-			log_op(OpSnapshotItem, kv->key, kv->value);
-			snapshotSize += kv->key.size() + kv->value.size() + OP_DISK_OVERHEAD;
+			auto key = kv.key(reserved_buffer, 10000);
+			log_op(OpSnapshotItem, key, *kv);
+			snapshotSize += key.size() + (*kv).size() + OP_DISK_OVERHEAD;
 			++count;
 		}
 
@@ -615,7 +613,7 @@ private:
 		currentSnapshotEnd = log_op(OpSnapshotEnd, StringRef(), StringRef());
 	}
 
-	ACTOR static Future<Void> snapshot( KeyValueStoreMemory* self ) {
+	ACTOR static Future<Void> snapshot( KeyValueStoreRadixTree* self ) {
 		Void _ = wait(self->recovering);
 
 		state Key nextKey = self->recoveredSnapshotKey;
@@ -625,7 +623,7 @@ private:
 		state int snapItems = 0;
 		state uint64_t snapshotBytes = 0;
 
-		TraceEvent("KVSMemStartingSnapshot", self->id).detail("StartKey", printable(nextKey));
+		TraceEvent("KVSRadixTreeStartingSnapshot", self->id).detail("StartKey", printable(nextKey));
 
 		loop {
 			Void _ = wait( self->notifiedCommittedWriteBytes.whenAtLeast( snapshotTotalWrittenBytes + 1 ) );
@@ -650,14 +648,13 @@ private:
 
 			if (next == self->data.end()) {
 				auto thisSnapshotEnd = self->log_op( OpSnapshotEnd, StringRef(), StringRef() );
-				//TraceEvent("SnapshotEnd", self->id)
-				//	.detail("LastKey", printable(lastKey.present() ? lastKey.get() : LiteralStringRef("<none>")))
-				//	.detail("CurrentSnapshotEndLoc", self->currentSnapshotEnd)
-				//	.detail("PreviousSnapshotEndLoc", self->previousSnapshotEnd)
-				//	.detail("ThisSnapshotEnd", thisSnapshotEnd)
-				//	.detail("Items", snapItems)
-				//	.detail("CommittedWrites", self->notifiedCommittedWriteBytes.get())
-				//	.detail("SnapshotSize", snapshotBytes);
+				TraceEvent("SnapshotEnd", self->id)
+					.detail("CurrentSnapshotEndLoc", self->currentSnapshotEnd)
+					.detail("PreviousSnapshotEndLoc", self->previousSnapshotEnd)
+					.detail("ThisSnapshotEnd", thisSnapshotEnd)
+					.detail("Items", snapItems)
+					.detail("CommittedWrites", self->notifiedCommittedWriteBytes.get())
+					.detail("SnapshotSize", snapshotBytes);
 
 				ASSERT(thisSnapshotEnd >= self->currentSnapshotEnd);
 				self->previousSnapshotEnd = self->currentSnapshotEnd;
@@ -674,56 +671,59 @@ private:
 
 				snapshotTotalWrittenBytes += OP_DISK_OVERHEAD;
 			} else {
-				self->log_op( OpSnapshotItem, next->key, next->value );
-				nextKey = next->key;
+				// TODO: temp arena, hopefully will outof scope
+				state KeyRef key = next.key(self->reserved_buffer, 10000);
+				self->log_op( OpSnapshotItem, key, (*next));
+				nextKey = key;
 				nextKeyAfter = true;
 				snapItems++;
-				uint64_t opBytes = next->key.size() + next->value.size() + OP_DISK_OVERHEAD;
+				uint64_t opBytes = key.size() + (*next).size() + OP_DISK_OVERHEAD;
 				snapshotBytes += opBytes;
 				snapshotTotalWrittenBytes += opBytes;
 			}
 		}
+
 	}
 
-	ACTOR static Future<Optional<Value>> waitAndReadValue( KeyValueStoreMemory* self, Key key ) {
+	ACTOR static Future<Optional<Value>> waitAndReadValue( KeyValueStoreRadixTree* self, Key key ) {
 		Void _ = wait( self->recovering );
 		return self->readValue(key).get();
 	}
-	ACTOR static Future<Optional<Value>> waitAndReadValuePrefix( KeyValueStoreMemory* self, Key key, int maxLength) {
+	ACTOR static Future<Optional<Value>> waitAndReadValuePrefix( KeyValueStoreRadixTree* self, Key key, int maxLength) {
 		Void _ = wait( self->recovering );
 		return self->readValuePrefix(key, maxLength).get();
 	}
-	ACTOR static Future<Standalone<VectorRef<KeyValueRef>>> waitAndReadRange( KeyValueStoreMemory* self, KeyRange keys, int rowLimit, int byteLimit ) {
+	ACTOR static Future<Standalone<VectorRef<KeyValueRef>>> waitAndReadRange( KeyValueStoreRadixTree* self, KeyRange keys, int rowLimit, int byteLimit ) {
 		Void _ = wait( self->recovering );
 		return self->readRange(keys, rowLimit, byteLimit).get();
 	}
-	ACTOR static Future<Void> waitAndCommit(KeyValueStoreMemory* self, bool sequential) {
+	ACTOR static Future<Void> waitAndCommit(KeyValueStoreRadixTree* self, bool sequential) {
 		Void _ = wait(self->recovering);
 		Void _ = wait(self->commit(sequential));
 		return Void();
 	}
-	ACTOR static Future<Void> commitAndUpdateVersions( KeyValueStoreMemory* self, Future<Void> commit, IDiskQueue::location location ) {
+	ACTOR static Future<Void> commitAndUpdateVersions( KeyValueStoreRadixTree* self, Future<Void> commit, IDiskQueue::location location ) {
 		Void _ = wait( commit );
 		self->log->pop(location);
 		return Void();
 	}
 };
 
-KeyValueStoreMemory::KeyValueStoreMemory( IDiskQueue* log, UID id, int64_t memoryLimit, bool disableSnapshot, bool replaceContent, bool exactRecovery )
+KeyValueStoreRadixTree::KeyValueStoreRadixTree( IDiskQueue* log, UID id, int64_t memoryLimit, bool disableSnapshot, bool replaceContent, bool exactRecovery )
 	: log(log), id(id), previousSnapshotEnd(-1), currentSnapshotEnd(-1), resetSnapshot(false), memoryLimit(memoryLimit), committedWriteBytes(0), overheadWriteBytes(0),
 	  committedDataSize(0), transactionSize(0), transactionIsLarge(false), disableSnapshot(disableSnapshot), replaceContent(replaceContent), snapshotCount(0), firstCommitWithSnapshot(true)
 {
+	// create reserved buffer
+	this->reserved_buffer = new uint8_t[10000];
 	recovering = recover( this, exactRecovery );
 	snapshotting = snapshot( this );
 	commitActors = actorCollection( addActor.getFuture() );
 }
 
-IKeyValueStore* keyValueStoreMemory( std::string const& basename, UID logID, int64_t memoryLimit, std::string ext ) {
-	TraceEvent("KVSMemOpening", logID).detail("Basename", basename).detail("MemoryLimit", memoryLimit);
+IKeyValueStore* keyValueStoreRadixTree( std::string const& basename, UID logID, int64_t memoryLimit, std::string ext ) {
+	TraceEvent("KVSRadixTreeOpening", logID).detail("Basename", basename).detail("MemoryLimit", memoryLimit);
 	IDiskQueue *log = openDiskQueue( basename, ext, logID );
-	return new KeyValueStoreMemory( log, logID, memoryLimit, false, false, false );
+	return new KeyValueStoreRadixTree( log, logID, memoryLimit, false, false, false );
 }
 
-IKeyValueStore* keyValueStoreLogSystem( class IDiskQueue* queue, UID logID, int64_t memoryLimit, bool disableSnapshot, bool replaceContent, bool exactRecovery ) {
-	return new KeyValueStoreMemory( queue, logID, memoryLimit, disableSnapshot, replaceContent, exactRecovery );
-}
+

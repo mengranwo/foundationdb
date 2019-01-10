@@ -65,6 +65,8 @@ const KeyRef JSONSchemas::statusSchema = LiteralStringRef(R"statusSchema(
                   "kvstore_available_bytes":12341234,
                   "kvstore_free_bytes":12341234,
                   "kvstore_total_bytes":12341234,
+                  "kvstore_total_size":12341234,
+                  "kvstore_total_nodes":12341234,
                   "durable_bytes":{
                      "hz":0.0,
                      "counter":0,
@@ -462,7 +464,8 @@ const KeyRef JSONSchemas::statusSchema = LiteralStringRef(R"statusSchema(
              "ssd",
              "ssd-1",
              "ssd-2",
-             "memory"
+             "memory",
+             "memory-radixtree"
          ]},
          "coordinators_count":1,
          "excluded_servers":[
@@ -603,7 +606,7 @@ const KeyRef JSONSchemas::statusSchema = LiteralStringRef(R"statusSchema(
    }
 })statusSchema");
 
-const KeyRef JSONSchemas::configurationSchema = LiteralStringRef(R"configSchema(
+const KeyRef JSONSchemas::configurationSchema = LiteralStringRef( R"configSchema(
 {
     "create":{
     "$enum":[

@@ -166,7 +166,7 @@ ACTOR Future<Void> testKVRead( KVTest* test, Key key, Histogram<float>* latency,
 	//ASSERT( s1 <= v || test->get(key, s1)==v );  // Plan A
 	ASSERT( s2 <= v || test->get(key, s2)==v );  // Causal consistency
 	ASSERT( v <= test->lastCommit );  // read committed
-	//ASSERT( v <= test->lastSet );  // read uncommitted
+	// ASSERT( v <= test->lastSet );  // read uncommitted
 	return Void();
 }
 
@@ -181,7 +181,7 @@ ACTOR Future<Void> testKVReadSaturation( KVTest* test, Histogram<float>* latency
 }
 
 ACTOR Future<Void> testKVCommit( KVTest* test, Histogram<float>* latency, PerfIntCounter* count ) {
-	state Version v = test->lastSet;
+    state Version v = test->lastSet;
 	test->lastCommit = v;
 	state double begin = timer();
 	Void _ = wait( test->store->commit() );
@@ -263,6 +263,8 @@ ACTOR Future<Void> testKVStoreMain( KVStoreTestWorkload* workload, KVTest* ptest
 	state char* extraValue = new char[extraBytes];
 	memset(extraValue, '.', extraBytes);
 
+	Void _ = wait( delay(10) );
+
 	if (workload->doCount) {
 		state int64_t count = 0;
 		state Key k;
@@ -287,76 +289,101 @@ ACTOR Future<Void> testKVStoreMain( KVStoreTestWorkload* workload, KVTest* ptest
 		state double setupNow = now();
 		state Future<Void> lastCommit = Void();
 		state int i;
-		for(i=0; i<workload->nodeCount; i++) {
-			test.store->set( KeyValueRef( test.makeKey( i ), wr.toStringRef() ) );
-			if (!((i+1) % 10000) || i+1==workload->nodeCount) {
-				Void _ = wait( lastCommit );
-				lastCommit = test.store->commit();
-				printf("ETA: %f seconds\n", (timer()-setupBegin) / i * (workload->nodeCount-i));
-			}
-		}
-		Void _ = wait( lastCommit );
+        for(i=0; i<workload->nodeCount; i++) {
+            test.store->set( KeyValueRef( test.makeKey( i ), test.makeKey( i )) ) ;
+            if (!((i+1) % 10000) || i+1==workload->nodeCount) {
+                Void _ = wait( lastCommit );
+                lastCommit = test.store->commit();
+                printf("ETA: %f seconds\n", (timer()-setupBegin) / i * (workload->nodeCount-i));
+            }
+        }
+
+        for(i=0; i<workload->nodeCount; i++) {
+            test.store->set( KeyValueRef( test.makeKey( i ), test.makeKey( i* 10)) ) ;
+            if (!((i+1) % 10000) || i+1==workload->nodeCount) {
+                Void _ = wait( lastCommit );
+                lastCommit = test.store->commit();
+                printf("ETA: %f seconds\n", (timer()-setupBegin) / i * (workload->nodeCount-i));
+            }
+        }
+        for(i=0; i<workload->nodeCount; i++) {
+            Optional<Value> result = wait(test.store->readValue(test.makeKey( i )));
+            if(result.present()){
+                ASSERT(result.get() == test.makeKey( i* 10));
+            } else {
+            	ASSERT (false);
+            }
+        }
 		workload->setupTook = timer()-setupBegin;
-		TraceEvent("KVStoreSetup").detail("Count", workload->nodeCount).detail("Took", workload->setupTook);
+		TraceEvent("KVStoreSetup").detail("Count", workload->nodeCount).detail("Took", workload->setupTook).detail("AvailableMemory", test.store->getStorageBytes().free);
 	}
 
 	state double t = now();
-	state double stopAt = t + workload->testDuration;
-	if (workload->saturation) {
-		if (workload->commitFraction) {
-			while (now() < stopAt) {
-				for(int s=0; s<1/workload->commitFraction; s++)
-				{
-					++test.lastSet;
-					BinaryWriter wr(Unversioned()); wr << test.lastSet;
-					wr.serializeBytes(extraValue, extraBytes);
-					test.set( KeyValueRef( test.randomKey(), wr.toStringRef() ) );
-					++workload->sets;
-				}
-				++commitsStarted;
-				Void _ = wait( testKVCommit( &test, &workload->commitLatency, &workload->commits ) );
-			}
-		} else {
-			vector<Future<Void>> actors;
-			for(int a=0; a<100; a++)
-				actors.push_back( testKVReadSaturation( &test, &workload->readLatency, &workload->reads ) );
-			Void _ = wait( timeout( waitForAll(actors), workload->testDuration, Void() ) );
-		}
-	} else {
-		while (t < stopAt) {
-			double end = now();
-			loop {
-				t += 1.0 / workload->operationsPerSecond;
-				double op = g_random->random01();
-				if (op < workload->commitFraction) {
-					// Commit
-					if (workload->commits.getValue() == commitsStarted) {
-						++commitsStarted;
-						ac.add( testKVCommit( &test, &workload->commitLatency, &workload->commits ) );
-					}
-				} else if (op < workload->commitFraction+workload->setFraction) {
-					// Set
-					++test.lastSet;
-					BinaryWriter wr(Unversioned()); wr << test.lastSet;
-					wr.serializeBytes(extraValue, extraBytes);
-					test.set( KeyValueRef( test.randomKey(), wr.toStringRef() ) );
-					++workload->sets;
-				} else {
-					// Read
-					ac.add( testKVRead( &test, test.randomKey(), &workload->readLatency, &workload->reads ) );
-				}
-				if (t >= end) break;
-			}
-			Void _ = wait( delayUntil(t) );
-		}
-	}
+//	state double stopAt = t + workload->testDuration;
+//	if (workload->saturation) {
+//		if (workload->commitFraction) {
+//			while (now() < stopAt) {
+//				for(int s=0; s<1/workload->commitFraction; s++)
+//				{
+//					++test.lastSet;
+//					BinaryWriter wr(Unversioned()); wr << test.lastSet;
+//					wr.serializeBytes(extraValue, extraBytes);
+//					test.set( KeyValueRef( test.randomKey(), wr.toStringRef() ) );
+//					++workload->sets;
+//				}
+//				++commitsStarted;
+//				Void _ = wait( testKVCommit( &test, &workload->commitLatency, &workload->commits ) );
+//			}
+//		} else {
+//			vector<Future<Void>> actors;
+//			for(int a=0; a<100; a++)
+//				actors.push_back( testKVReadSaturation( &test, &workload->readLatency, &workload->reads ) );
+//			Void _ = wait( timeout( waitForAll(actors), workload->testDuration, Void() ) );
+//		}
+//	} else {
+//		while (t < stopAt) {
+//			double end = now();
+//			loop {
+//				t += 1.0 / workload->operationsPerSecond;
+//				double op = g_random->random01();
+//				if (op < workload->commitFraction) {
+//					// Commit
+//					if (workload->commits.getValue() == commitsStarted) {
+//						++commitsStarted;
+//						ac.add( testKVCommit( &test, &workload->commitLatency, &workload->commits ) );
+//					}
+//				} else if (op < workload->commitFraction+workload->setFraction) {
+//					// Set
+//					++test.lastSet;
+//					BinaryWriter wr(Unversioned()); wr << test.lastSet;
+//					wr.serializeBytes(extraValue, extraBytes);
+//					test.set( KeyValueRef( test.randomKey(), wr.toStringRef() ) );
+//					++workload->sets;
+//				} else {
+//					// Read
+//					ac.add( testKVRead( &test, test.randomKey(), &workload->readLatency, &workload->reads ) );
+//				}
+//				if (t >= end) break;
+//			}
+//			Void _ = wait( delayUntil(t) );
+//		}
+//	}
 
 	if (workload->doClear) {
-		state int chunk = 1000000;
+		state int chunk = 50;
 		t = timer();
-		for(i = 0; i < workload->nodeCount; i+=chunk) {
+		for (i = 0; i < workload->nodeCount - chunk; i += chunk) {
 			test.store->clear( KeyRangeRef(  test.makeKey( i ),  test.makeKey( i + chunk ) ) );
 			Void _ = wait( test.store->commit() );
+		}
+
+		for (i = workload->nodeCount - 50; i < workload->nodeCount; i++) {
+			Optional<Value> result = wait(test.store->readValue(test.makeKey(i)));
+			if (result.present()) {
+				ASSERT(result.get() == test.makeKey(i * 10));
+			} else {
+				ASSERT(false);
+			}
 		}
 		TraceEvent("KVStoreClear").detail("Took", timer() - t);
 	}
@@ -381,6 +408,8 @@ ACTOR Future<Void> testKVStore(KVStoreTestWorkload* workload) {
 		test.store = keyValueStoreSQLite( fn, id, KeyValueStoreType::SSD_BTREE_V2);
 	else if (workload->storeType == "memory")
 		test.store = keyValueStoreMemory( fn, id, 500e6 );
+    else if (workload->storeType == "memory-radixtree")
+        test.store = keyValueStoreRadixTree( fn, id, 500e6 );
 	else
 		ASSERT(false);
 

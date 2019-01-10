@@ -52,11 +52,17 @@ public:
 	virtual Future<Standalone<VectorRef<KeyValueRef>>> readRange( KeyRangeRef keys, int rowLimit = 1<<30, int byteLimit = 1<<30 ) = 0;
 
 	//Returns the amount of free and total space for this store, in bytes
+	virtual std::tuple<size_t, size_t, size_t> getSize() { return std::make_tuple(0, 0, 0); }
+
+	//Returns how many key & value pairs have been inserted and how many nodes have been created
 	virtual StorageBytes getStorageBytes() = 0;
 
 	virtual void resyncLog() {}
 
 	virtual void enableSnapshot() {}
+
+	// for debug, print out detailed node info
+	virtual void printData() {}
 	/*
 	Concurrency contract
 		Causal consistency:
@@ -77,7 +83,8 @@ protected:
 };
 
 extern IKeyValueStore* keyValueStoreSQLite( std::string const& filename, UID logID, KeyValueStoreType storeType, bool checkChecksums=false, bool checkIntegrity=false );
-extern IKeyValueStore* keyValueStoreMemory( std::string const& basename, UID logID, int64_t memoryLimit );
+extern IKeyValueStore* keyValueStoreMemory( std::string const& basename, UID logID, int64_t memoryLimit, std::string ext = "fdq" );
+extern IKeyValueStore* keyValueStoreRadixTree( std::string const& basename, UID logID, int64_t memoryLimit, std::string ext = "fdr" );
 extern IKeyValueStore* keyValueStoreLogSystem( class IDiskQueue* queue, UID logID, int64_t memoryLimit, bool disableSnapshot, bool replaceContent, bool exactRecovery );
 
 inline IKeyValueStore* openKVStore( KeyValueStoreType storeType, std::string const& filename, UID logID, int64_t memoryLimit, bool checkChecksums=false, bool checkIntegrity=false ) {
@@ -88,6 +95,8 @@ inline IKeyValueStore* openKVStore( KeyValueStoreType storeType, std::string con
 		return keyValueStoreSQLite(filename, logID, KeyValueStoreType::SSD_BTREE_V2, checkChecksums, checkIntegrity);
 	case KeyValueStoreType::MEMORY:
 		return keyValueStoreMemory( filename, logID, memoryLimit );
+        case KeyValueStoreType::MEMORY_RADIXTREE:
+            return keyValueStoreRadixTree( filename, logID, memoryLimit );
 	default:
 		UNREACHABLE();
 	}

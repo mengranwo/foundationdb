@@ -42,6 +42,7 @@
     <ActorCompiler Include="Ratekeeper.actor.cpp" />
     <ActorCompiler Include="DiskQueue.actor.cpp" />
     <ActorCompiler Include="KeyValueStoreMemory.actor.cpp" />
+    <ActorCompiler Include="KeyValueStoreRadixTree.actor.cpp" />
     <ActorCompiler Include="SimulatedCluster.actor.cpp" />
     <ActorCompiler Include="KeyValueStoreCompressTestData.actor.cpp" />
     <ClCompile Include="Knobs.cpp" />
