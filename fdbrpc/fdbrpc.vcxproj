@@ -44,6 +44,8 @@
     <ClCompile Include="zlib\zutil.c" />
     <ClCompile Include="zlib\crc32.c" />
     <ClCompile Include="zlib\adler32.c" />
+    <ClCompile Include="zlib\compress.c" />
+    <ClCompile Include="zlib\uncompr.c" />
     <ClCompile Include="zlib\gzread.c" />
     <ClCompile Include="zlib\trees.c" />
     <ClCompile Include="zlib\infback.c" />

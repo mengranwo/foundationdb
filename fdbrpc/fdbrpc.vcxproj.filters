@@ -48,6 +48,12 @@
     <ClCompile Include="zlib\adler32.c">
       <Filter>zlib</Filter>
     </ClCompile>
+    <ClCompile Include="zlib\compress.c">
+      <Filter>zlib</Filter>
+    </ClCompile>
+    <ClCompile Include="zlib\uncompr.c">
+      <Filter>zlib</Filter>
+    </ClCompile>
     <ClCompile Include="zlib\crc32.c">
       <Filter>zlib</Filter>
     </ClCompile>
