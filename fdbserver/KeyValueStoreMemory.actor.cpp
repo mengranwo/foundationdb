@@ -25,6 +25,7 @@
 #include "flow/ActorCollection.h"
 #include "fdbclient/Notified.h"
 #include "fdbclient/SystemData.h"
+#include "fdbrpc/zlib/zlib.h"
 
 #define OP_DISK_OVERHEAD (sizeof(OpHeader) + 1)
 
@@ -65,7 +66,9 @@ public:
 	virtual void close() { recovering.cancel(); log->close(); delete this; }
 
 	// IKeyValueStore
-	virtual KeyValueStoreType getType() { return KeyValueStoreType::MEMORY; }
+	virtual KeyValueStoreType getType() {
+	    return KeyValueStoreType::MEMORY;
+	}
 
 	int64_t getAvailableSize() {
 		int64_t residentSize =
@@ -259,6 +262,42 @@ public:
 		disableSnapshot = false;
 	}
 
+	static StringRef compressLog(StringRef target, Arena &arena) {
+        unsigned char *compr;
+        unsigned long comprLen;
+
+        unsigned long len = (unsigned long)target.size();
+        compr    = new (arena) unsigned char[500];
+        memset(compr, 0, 500);
+
+        int err = compress(compr, &comprLen, (const unsigned char *)(target.begin()), len);
+        if (err != 0) {
+            fprintf(stderr, "compression error: %d %lu\n", err, len);
+            throw please_reboot_delete();
+        }
+
+        return StringRef(compr, comprLen);
+    }
+
+	static StringRef deCompressLog(StringRef target, Arena &arena) {
+	    if(target.size() == 0)
+	        return StringRef();
+
+		unsigned char *uncompr;
+		unsigned long uncomprLen;
+
+		uncompr    = new (arena) unsigned char[500];
+		memset(uncompr, 0, 500);
+
+		int err = uncompress(uncompr, &uncomprLen, (const unsigned char *)(target.begin()), target.size());
+		if (err != Z_OK) {
+			fprintf(stderr, "uncompression error: %d %d\n", err, target.size());
+            throw please_reboot_delete();
+		}
+
+		return StringRef(uncompr, uncomprLen);
+	}
+
 private:
 	enum OpType {
 		OpSet,
@@ -420,10 +459,26 @@ private:
 	}
 
 	IDiskQueue::location log_op(OpType op, StringRef v1, StringRef v2) {
-		OpHeader h = {(int)op, v1.size(), v2.size()};
+		StringRef compressedV1, compressedV2;
+		// once arena go out of scope, compressedV1/V2 become invalid
+		Arena arena;
+		int v1Size = v1.size();
+		int v2Size = v2.size();
+
+		if(v1Size > 0){
+			compressedV1 = KeyValueStoreMemory::compressLog(v1, arena);
+			v1Size = compressedV1.size();
+		}
+
+		if(v2Size > 0){
+			compressedV2 = KeyValueStoreMemory::compressLog(v2, arena);
+			v2Size = compressedV2.size();
+		}
+
+		OpHeader h = {(int)op, v1Size, v2Size};
 		log->push( StringRef((const uint8_t*)&h, sizeof(h)) );
-		log->push( v1 );
-		log->push( v2 );
+		log->push( compressedV1 );
+		log->push( compressedV2 );
 		return log->push( LiteralStringRef("\x01") ); // Changes here should be reflected in OP_DISK_OVERHEAD
 	}
 
@@ -447,6 +502,7 @@ private:
 
 		state OpQueue recoveryQueue;
 		state OpHeader h;
+		state Arena arena;
 
 		TraceEvent("KVSMemRecoveryStarted", self->id)
 			.detail("SnapshotEndLocation", uncommittedSnapshotEnd);
@@ -484,8 +540,8 @@ private:
 				}
 
 				if (data[data.size()-1]) {
-					StringRef p1 = data.substr(0, h.len1);
-					StringRef p2 = data.substr(h.len1, h.len2);
+					StringRef p1 = KeyValueStoreMemory::deCompressLog(data.substr(0, h.len1), arena);
+					StringRef p2 = KeyValueStoreMemory::deCompressLog(data.substr(h.len1, h.len2), arena);
 
 					if (h.op == OpSnapshotItem) { // snapshot data item
 						/*if (p1 < uncommittedNextKey) {
