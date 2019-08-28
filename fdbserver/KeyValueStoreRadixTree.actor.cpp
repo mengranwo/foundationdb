@@ -343,7 +343,7 @@ private:
 
 	UID id;
 
-	radix_tree< StringRef > data;
+	radix_tree data;
 	// reserved buffer for snapshot/fullsnapshot
 	uint8_t *reserved_buffer;
 
@@ -589,7 +589,7 @@ private:
 	}
 
 	//Snapshots an entire data set
-	void fullSnapshot( radix_tree< StringRef> &snapshotData ) {
+	void fullSnapshot(radix_tree& snapshotData) {
 		previousSnapshotEnd = log_op(OpSnapshotAbort, StringRef(), StringRef());
 		replaceContent = false;
 
