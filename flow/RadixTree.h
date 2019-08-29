@@ -187,7 +187,8 @@ public:
 		const iterator& operator--();
 		bool operator != (const iterator &lhs) const;
         bool operator == (const iterator &lhs) const;
-		StringRef key(uint8_t* content, int len) const;
+		StringRef getKey(uint8_t* content, int len) const;
+		StringRef getValue() const { return m_pointee->getData(); }
 
 	private:
 		node* increment(node* target) const;
@@ -240,8 +241,8 @@ public:
 	iterator lower_bound(const StringRef& key);
 	iterator upper_bound(const StringRef& key);
 	// access
-    int64_t sum_to(iterator to);
-    iterator previous (iterator i);
+	uint64_t sum_to(iterator to);
+	iterator previous (iterator i);
 
 private:
     size_type m_size;
@@ -249,7 +250,7 @@ private:
     size_type m_node;
 	// number of nodes with data.size() <= 12
 	size_type inline_keys;
-	int64_t total_bytes;
+	uint64_t total_bytes;
 	node* m_root;
 
 	// modification
@@ -507,15 +508,15 @@ radix_tree::iterator radix_tree::iterator::operator++(int) {
 /*
  * reconstruct the key, using @param arena to allocate memory
  */
-StringRef radix_tree::iterator::key(uint8_t* content, int len) const {
+StringRef radix_tree::iterator::getKey(uint8_t* content, int len) const {
 	if (m_pointee == NULL) return StringRef();
 
 	ASSERT(m_pointee->m_is_leaf);
     memset(content, 0, len);
 
     auto node = m_pointee;
-    int64_t pos = m_pointee->m_depth;
-    while(true){
+	uint32_t pos = m_pointee->m_depth;
+	while(true){
 		if (!node->m_is_leaf) memcpy(content + pos, node->getData().begin(), node->getDataSize());
 		node = node->m_parent;
 		if (node == NULL || pos <= 0) break;
@@ -664,7 +665,7 @@ radix_tree::iterator radix_tree::upper_bound(const StringRef& key, node* node) {
 }
 
 // Return the sum of getT(x) for begin()<=x<to
-int64_t radix_tree::sum_to(iterator to) {
+uint64_t radix_tree::sum_to(iterator to) {
 	if(to == end()) {
         return m_root ? total_bytes : 0;
     }

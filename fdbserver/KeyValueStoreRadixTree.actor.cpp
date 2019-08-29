@@ -96,7 +96,7 @@ public:
 	virtual void printData() {
 		printf("radix tree size %lu\n", std::get<0>(data.size()));
 		for (auto it = data.begin(); it != data.end(); ++it) {
-			StringRef key = it.key(reserved_buffer, 10000);
+			StringRef key = it.getKey(reserved_buffer, 10000);
 			printf("key[%s : %d] value[%s : %d]\n", printable(key).c_str(), key.size(), printable(*it).c_str(),
 			       (*it).size());
 		}
@@ -229,24 +229,24 @@ public:
 		Standalone<VectorRef<KeyValueRef>> result;
 		if (rowLimit >= 0) {
 			auto it = data.lower_bound(keys.begin);
-			auto keyStart = it.key(reserved_buffer, 10000);
+			auto keyStart = it.getKey(reserved_buffer, 10000);
 			while (it!=data.end() && keyStart < keys.end && rowLimit && byteLimit>=0) {
 				byteLimit -= sizeof(KeyValueRef) + keyStart.size() + (*it).size();
 				result.push_back_deep( result.arena(), KeyValueRef(keyStart, (*it) ));
 				++it;
 				--rowLimit;
-                keyStart = it.key(reserved_buffer, 10000);
+				keyStart = it.getKey(reserved_buffer, 10000);
 			}
 		} else {
 			rowLimit = -rowLimit;
 			auto it = data.previous( data.lower_bound(keys.end) );
-            auto keyStart = it.key(reserved_buffer, 10000);
+			auto keyStart = it.getKey(reserved_buffer, 10000);
 			while (it!=data.end() && keyStart >= keys.begin && rowLimit && byteLimit>=0) {
 				byteLimit -= sizeof(KeyValueRef) + keyStart.size() + (*it).size();
 				result.push_back_deep( result.arena(), KeyValueRef(keyStart, (*it)) );
 				it = data.previous(it);
 				--rowLimit;
-                keyStart = it.key(reserved_buffer, 10000);
+				keyStart = it.getKey(reserved_buffer, 10000);
 			}
 		}
 		return result;
@@ -599,7 +599,7 @@ private:
 		int count = 0;
 		int64_t snapshotSize = 0;
 		for(auto kv = snapshotData.begin(); kv != snapshotData.end(); ++kv) {
-			auto key = kv.key(reserved_buffer, 10000);
+			auto key = kv.getKey(reserved_buffer, 10000);
 			log_op(OpSnapshotItem, key, *kv);
 			snapshotSize += key.size() + (*kv).size() + OP_DISK_OVERHEAD;
 			++count;
@@ -672,7 +672,7 @@ private:
 				snapshotTotalWrittenBytes += OP_DISK_OVERHEAD;
 			} else {
 				// TODO: temp arena, hopefully will outof scope
-				state KeyRef key = next.key(self->reserved_buffer, 10000);
+				state KeyRef key = next.getKey(self->reserved_buffer, 10000);
 				self->log_op( OpSnapshotItem, key, (*next));
 				nextKey = key;
 				nextKeyAfter = true;
