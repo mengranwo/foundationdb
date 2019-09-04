@@ -217,20 +217,24 @@ public:
 		Standalone<VectorRef<KeyValueRef>> result;
 		if (rowLimit >= 0) {
 			auto it = data.lower_bound(keys.begin);
-			while (it != data.end() && it->key < keys.end && rowLimit && byteLimit >= 0) {
-				byteLimit -= sizeof(KeyValueRef) + it->key.size() + it->value.size();
-				result.push_back_deep(result.arena(), KeyValueRef(it->key, it->value));
+			auto keyStart = it.getKey(nullptr, 0);
+			while (it != data.end() && keyStart < keys.end && rowLimit && byteLimit >= 0) {
+				byteLimit -= sizeof(KeyValueRef) + keyStart.size() + it.getValue().size();
+				result.push_back_deep(result.arena(), KeyValueRef(keyStart, it.getValue()));
 				++it;
 				--rowLimit;
+				keyStart = it.getKey(nullptr, 0);
 			}
 		} else {
 			rowLimit = -rowLimit;
 			auto it = data.previous(data.lower_bound(keys.end));
-			while (it != data.end() && it->key >= keys.begin && rowLimit && byteLimit >= 0) {
-				byteLimit -= sizeof(KeyValueRef) + it->key.size() + it->value.size();
-				result.push_back_deep(result.arena(), KeyValueRef(it->key, it->value));
+			auto keyStart = it.getKey(nullptr, 0);
+			while (it != data.end() && keyStart >= keys.begin && rowLimit && byteLimit >= 0) {
+				byteLimit -= sizeof(KeyValueRef) + keyStart.size() + it.getValue().size();
+				result.push_back_deep(result.arena(), KeyValueRef(keyStart, it.getValue()));
 				it = data.previous(it);
 				--rowLimit;
+				keyStart = it.getKey(nullptr, 0);
 			}
 		}
 		return result;
@@ -583,8 +587,9 @@ private:
 		int count = 0;
 		int64_t snapshotSize = 0;
 		for (auto kv = snapshotData.begin(); kv != snapshotData.end(); ++kv) {
-			log_op(OpSnapshotItem, kv->key, kv->value);
-			snapshotSize += kv->key.size() + kv->value.size() + OP_DISK_OVERHEAD;
+			auto key = kv.getKey(nullptr, 0);
+			log_op(OpSnapshotItem, key, kv.getValue());
+			snapshotSize += key.size() + kv.getValue().size() + OP_DISK_OVERHEAD;
 			++count;
 		}
 
@@ -655,11 +660,12 @@ private:
 
 				snapshotTotalWrittenBytes += OP_DISK_OVERHEAD;
 			} else {
-				self->log_op(OpSnapshotItem, next->key, next->value);
-				nextKey = next->key;
+				state KeyRef key = next.getKey(nullptr, 0);
+				self->log_op(OpSnapshotItem, key, next.getValue());
+				nextKey = key;
 				nextKeyAfter = true;
 				snapItems++;
-				uint64_t opBytes = next->key.size() + next->value.size() + OP_DISK_OVERHEAD;
+				uint64_t opBytes = key.size() + next.getValue().size() + OP_DISK_OVERHEAD;
 				snapshotBytes += opBytes;
 				snapshotTotalWrittenBytes += opBytes;
 			}

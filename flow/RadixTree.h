@@ -234,7 +234,6 @@ public:
     iterator end();
     //modifications
 	std::pair<iterator, bool> insert(const StringRef& key, const StringRef& val, bool replaceExisting = true);
-	bool erase(node* child);
 	void erase(iterator it);
 	void erase(iterator begin, iterator end);
 	// lookups
@@ -282,6 +281,7 @@ private:
 	node* find_node(const StringRef& key, node* node, int depth);
 	node* append(node* parent, const StringRef& key, const StringRef& val);
 	node* prepend(node* node, const StringRef& key, const StringRef& val);
+	bool erase(node* child);
 	iterator lower_bound(const StringRef& key, node* node);
 	iterator upper_bound(const StringRef& key, node* node);
 };

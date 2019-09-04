@@ -55,6 +55,10 @@ public:
 
 	bool empty() { return data.empty(); }
 	void clear() { return data.clear(); }
+	std::tuple<size_t, size_t, size_t> size() {
+		uint64_t total_bytes = sumTo(data.end());
+		return std::make_tuple(total_bytes, total_bytes, 0);
+	}
 
 	iterator find(const StringRef& key) { return data.find(key); }
 	iterator begin() { return data.begin(); }

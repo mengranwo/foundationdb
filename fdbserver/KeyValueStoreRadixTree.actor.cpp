@@ -109,7 +109,7 @@ public:
 
 //		printf("insert: key[%s] value[%s] and larger %d? \n", printable(keyValue.key).c_str(), printable(keyValue.value).c_str(), transactionIsLarge);
         if(transactionIsLarge) {
-			data.insert(keyValue.key, keyValue.value, true);
+			data.insert(keyValue.key, keyValue.value);
 		}
 		else {
 			queue.set(keyValue, arena);
@@ -117,7 +117,7 @@ public:
 				semiCommit();
 			}
 		}
-		//		printf("insert end: tree size[%lu]\n", std::get<0>(data.size()));
+		// printf("insert end: tree size[%lu]\n", std::get<0>(data.size()));
 	}
 
 	virtual void clear(KeyRangeRef range, const Arena* arena) {
@@ -382,9 +382,8 @@ private:
 			++count;
 			total += o->p1.size() + o->p2.size() + OP_DISK_OVERHEAD;
 			if (o->op == OpSet) {
-				data.insert(o->p1, o->p2, true);
-				//				printf("commit_queue : set key[%s] value[%s]\n", o->p1.toString().c_str(),
-				//o->p2.toString().c_str());
+				data.insert(o->p1, o->p2);
+				// printf("commit_queue : set key[%s] value[%s]\n", o->p1.toString().c_str(), o->p2.toString().c_str());
 			}
 			else if (o->op == OpClear) {
 				data.erase( data.lower_bound(o->p1), data.lower_bound(o->p2) );
