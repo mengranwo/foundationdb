@@ -83,7 +83,8 @@ protected:
 };
 
 extern IKeyValueStore* keyValueStoreSQLite( std::string const& filename, UID logID, KeyValueStoreType storeType, bool checkChecksums=false, bool checkIntegrity=false );
-extern IKeyValueStore* keyValueStoreMemory( std::string const& basename, UID logID, int64_t memoryLimit, std::string ext = "fdq" );
+extern IKeyValueStore* keyValueStoreMemory(std::string const& basename, UID logID, int64_t memoryLimit,
+                                           KeyValueStoreType storeType = KeyValueStoreType::MEMORY);
 extern IKeyValueStore* keyValueStoreRadixTree( std::string const& basename, UID logID, int64_t memoryLimit, std::string ext = "fdr" );
 extern IKeyValueStore* keyValueStoreLogSystem( class IDiskQueue* queue, UID logID, int64_t memoryLimit, bool disableSnapshot, bool replaceContent, bool exactRecovery );
 
@@ -94,8 +95,8 @@ inline IKeyValueStore* openKVStore( KeyValueStoreType storeType, std::string con
 	case KeyValueStoreType::SSD_BTREE_V2:
 		return keyValueStoreSQLite(filename, logID, KeyValueStoreType::SSD_BTREE_V2, checkChecksums, checkIntegrity);
 	case KeyValueStoreType::MEMORY:
-		return keyValueStoreMemory( filename, logID, memoryLimit );
-        case KeyValueStoreType::MEMORY_RADIXTREE:
+		return keyValueStoreMemory(filename, logID, memoryLimit, KeyValueStoreType::MEMORY);
+	    case KeyValueStoreType::MEMORY_RADIXTREE:
             return keyValueStoreRadixTree( filename, logID, memoryLimit );
 	default:
 		UNREACHABLE();

@@ -46,6 +46,16 @@ struct KeyValueMapPair {
 	bool operator!=(KeyValueMapPair const& r) const { return key != r.key; }
 };
 
+template <class CompatibleWithKey>
+bool operator<(KeyValueMapPair const& l, CompatibleWithKey const& r) {
+	return l.key < r;
+}
+
+template <class CompatibleWithKey>
+bool operator<(CompatibleWithKey const& l, KeyValueMapPair const& r) {
+	return l < r.key;
+}
+
 class IKeyValueContainer {
 public:
 	typedef typename IndexedSet<KeyValueMapPair, uint64_t>::iterator iterator;

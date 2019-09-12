@@ -28,18 +28,12 @@
 
 #define OP_DISK_OVERHEAD (sizeof(OpHeader) + 1)
 
-template <class CompatibleWithKey>
-bool operator<(KeyValueMapPair const& l, CompatibleWithKey const& r) { return l.key < r; }
-
-template <class CompatibleWithKey>
-bool operator<(CompatibleWithKey const& l, KeyValueMapPair const& r) { return l < r.key; }
-
 extern bool noUnseed;
 
 class KeyValueStoreMemory : public IKeyValueStore, NonCopyable {
 public:
-	KeyValueStoreMemory(IDiskQueue* log, UID id, int64_t memoryLimit, bool disableSnapshot, bool replaceContent,
-	                    bool exactRecovery);
+	KeyValueStoreMemory(IDiskQueue* log, UID id, int64_t memoryLimit, KeyValueStoreType storeType, bool disableSnapshot,
+	                    bool replaceContent, bool exactRecovery);
 
 	// IClosable
 	virtual Future<Void> getError() { return log->getError(); }
@@ -56,7 +50,7 @@ public:
 	}
 
 	// IKeyValueStore
-	virtual KeyValueStoreType getType() { return KeyValueStoreType::MEMORY; }
+	virtual KeyValueStoreType getType() { return type; }
 
 	int64_t getAvailableSize() {
 		int64_t residentSize = data.sumTo(data.end()) + queue.totalSize() + // doesn't account for overhead in queue
@@ -217,24 +211,24 @@ public:
 		Standalone<VectorRef<KeyValueRef>> result;
 		if (rowLimit >= 0) {
 			auto it = data.lower_bound(keys.begin);
-			auto keyStart = it.getKey(nullptr, 0);
+			auto keyStart = it.getKey(reserved_buffer, 10000);
 			while (it != data.end() && keyStart < keys.end && rowLimit && byteLimit >= 0) {
 				byteLimit -= sizeof(KeyValueRef) + keyStart.size() + it.getValue().size();
 				result.push_back_deep(result.arena(), KeyValueRef(keyStart, it.getValue()));
 				++it;
 				--rowLimit;
-				keyStart = it.getKey(nullptr, 0);
+				keyStart = it.getKey(reserved_buffer, 10000);
 			}
 		} else {
 			rowLimit = -rowLimit;
 			auto it = data.previous(data.lower_bound(keys.end));
-			auto keyStart = it.getKey(nullptr, 0);
+			auto keyStart = it.getKey(reserved_buffer, 10000);
 			while (it != data.end() && keyStart >= keys.begin && rowLimit && byteLimit >= 0) {
 				byteLimit -= sizeof(KeyValueRef) + keyStart.size() + it.getValue().size();
 				result.push_back_deep(result.arena(), KeyValueRef(keyStart, it.getValue()));
 				it = data.previous(it);
 				--rowLimit;
-				keyStart = it.getKey(nullptr, 0);
+				keyStart = it.getKey(reserved_buffer, 10000);
 			}
 		}
 		return result;
@@ -319,10 +313,12 @@ private:
 		uint64_t numBytes;
 		std::vector<Arena> arenas;
 	};
-
+	KeyValueStoreType type;
 	UID id;
 
 	IKeyValueContainer data;
+	// reserved buffer for snapshot/fullsnapshot
+	uint8_t* reserved_buffer;
 
 	OpQueue queue; // mutations not yet commit()ted
 	IDiskQueue* log;
@@ -587,7 +583,7 @@ private:
 		int count = 0;
 		int64_t snapshotSize = 0;
 		for (auto kv = snapshotData.begin(); kv != snapshotData.end(); ++kv) {
-			auto key = kv.getKey(nullptr, 0);
+			auto key = kv.getKey(reserved_buffer, 10000);
 			log_op(OpSnapshotItem, key, kv.getValue());
 			snapshotSize += key.size() + kv.getValue().size() + OP_DISK_OVERHEAD;
 			++count;
@@ -660,7 +656,7 @@ private:
 
 				snapshotTotalWrittenBytes += OP_DISK_OVERHEAD;
 			} else {
-				state KeyRef key = next.getKey(nullptr, 0);
+				state KeyRef key = next.getKey(self->reserved_buffer, 10000);
 				self->log_op(OpSnapshotItem, key, next.getValue());
 				nextKey = key;
 				nextKeyAfter = true;
@@ -698,22 +694,32 @@ private:
 	}
 };
 
-KeyValueStoreMemory::KeyValueStoreMemory(IDiskQueue* log, UID id, int64_t memoryLimit, bool disableSnapshot,
-                                         bool replaceContent, bool exactRecovery)
-  : log(log), id(id), previousSnapshotEnd(-1), currentSnapshotEnd(-1), resetSnapshot(false), memoryLimit(memoryLimit),
-    committedWriteBytes(0), overheadWriteBytes(0), committedDataSize(0), transactionSize(0), transactionIsLarge(false),
-    disableSnapshot(disableSnapshot), replaceContent(replaceContent), snapshotCount(0), firstCommitWithSnapshot(true) {
+KeyValueStoreMemory::KeyValueStoreMemory(IDiskQueue* log, UID id, int64_t memoryLimit, KeyValueStoreType storeType,
+                                         bool disableSnapshot, bool replaceContent, bool exactRecovery)
+  : log(log), id(id), type(storeType), previousSnapshotEnd(-1), currentSnapshotEnd(-1), resetSnapshot(false),
+    memoryLimit(memoryLimit), committedWriteBytes(0), overheadWriteBytes(0), committedDataSize(0), transactionSize(0),
+    transactionIsLarge(false), disableSnapshot(disableSnapshot), replaceContent(replaceContent), snapshotCount(0),
+    firstCommitWithSnapshot(true) {
+	// create reserved buffer for radixtree store type
+	this->reserved_buffer = (storeType == KeyValueStoreType::MEMORY) ? nullptr : new uint8_t[10000];
 	recovering = recover(this, exactRecovery);
 	snapshotting = snapshot(this);
 	commitActors = actorCollection(addActor.getFuture());
 }
 
-IKeyValueStore* keyValueStoreMemory( std::string const& basename, UID logID, int64_t memoryLimit, std::string ext ) {
-	TraceEvent("KVSMemOpening", logID).detail("Basename", basename).detail("MemoryLimit", memoryLimit);
+IKeyValueStore* keyValueStoreMemory(std::string const& basename, UID logID, int64_t memoryLimit,
+                                    KeyValueStoreType storeType) {
+	std::string ext = (storeType == KeyValueStoreType::MEMORY) ? "fdq" : "fdr";
+	TraceEvent("KVSMemOpening", logID)
+	    .detail("Basename", basename)
+	    .detail("MemoryLimit", memoryLimit)
+	    .detail("storeType", storeType);
+
 	IDiskQueue* log = openDiskQueue(basename, ext, logID);
-	return new KeyValueStoreMemory(log, logID, memoryLimit, false, false, false);
+	return new KeyValueStoreMemory(log, logID, memoryLimit, storeType, false, false, false);
 }
 
 IKeyValueStore* keyValueStoreLogSystem( class IDiskQueue* queue, UID logID, int64_t memoryLimit, bool disableSnapshot, bool replaceContent, bool exactRecovery ) {
-	return new KeyValueStoreMemory(queue, logID, memoryLimit, disableSnapshot, replaceContent, exactRecovery);
+	return new KeyValueStoreMemory(queue, logID, memoryLimit, KeyValueStoreType::MEMORY, disableSnapshot,
+	                               replaceContent, exactRecovery);
 }
