@@ -748,8 +748,8 @@ void SimulationConfig::generateNormalConfig(int minimumReplication, int minimumR
 //	} else {
 //		set_config("memory");
 //	}
-	set_config("memory");
-	//    set_config("memory-radixtree");
+//	set_config("memory");
+	set_config("memory-radixtree");
 
 	int replication_type = std::max(minimumReplication, datacenters > 4 ? g_random->randomInt(1,3) : std::min(g_random->randomInt(0,6), 3));
 	switch (replication_type) {

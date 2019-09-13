@@ -409,7 +409,7 @@ ACTOR Future<Void> testKVStore(KVStoreTestWorkload* workload) {
 	else if (workload->storeType == "memory")
 		test.store = keyValueStoreMemory( fn, id, 500e6 );
     else if (workload->storeType == "memory-radixtree")
-        test.store = keyValueStoreRadixTree( fn, id, 500e6 );
+        test.store = keyValueStoreMemory( fn, id, 500e6, KeyValueStoreType::MEMORY_RADIXTREE );
 	else
 		ASSERT(false);
 

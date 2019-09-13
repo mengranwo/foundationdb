@@ -22,6 +22,7 @@
 #include "IKeyValueStore.h"
 #include "IDiskQueue.h"
 #include "flow/IKeyValueContainer.h"
+#include "flow/RadixTree.h"
 #include "flow/ActorCollection.h"
 #include "fdbclient/Notified.h"
 #include "fdbclient/SystemData.h"
@@ -30,6 +31,7 @@
 
 extern bool noUnseed;
 
+template <typename Container>
 class KeyValueStoreMemory : public IKeyValueStore, NonCopyable {
 public:
 	KeyValueStoreMemory(IDiskQueue* log, UID id, int64_t memoryLimit, KeyValueStoreType storeType, bool disableSnapshot,
@@ -183,7 +185,7 @@ public:
 
 		auto it = data.find(key);
 		if (it == data.end()) return Optional<Value>();
-		return Optional<Value>(it->value);
+		return Optional<Value>(it.getValue());
 	}
 
 	virtual Future<Optional<Value>> readValuePrefix(KeyRef key, int maxLength,
@@ -193,7 +195,7 @@ public:
 
 		auto it = data.find(key);
 		if (it == data.end()) return Optional<Value>();
-		auto val = it->value;
+		auto val = it.getValue();
 		if (maxLength < val.size()) {
 			return Optional<Value>(val.substr(0, maxLength));
 		} else {
@@ -316,7 +318,7 @@ private:
 	KeyValueStoreType type;
 	UID id;
 
-	IKeyValueContainer data;
+	Container data;
 	// reserved buffer for snapshot/fullsnapshot
 	uint8_t* reserved_buffer;
 
@@ -573,7 +575,7 @@ private:
 	}
 
 	// Snapshots an entire data set
-	void fullSnapshot(IKeyValueContainer& snapshotData) {
+	void fullSnapshot(Container& snapshotData) {
 		previousSnapshotEnd = log_op(OpSnapshotAbort, StringRef(), StringRef());
 		replaceContent = false;
 
@@ -694,8 +696,10 @@ private:
 	}
 };
 
-KeyValueStoreMemory::KeyValueStoreMemory(IDiskQueue* log, UID id, int64_t memoryLimit, KeyValueStoreType storeType,
-                                         bool disableSnapshot, bool replaceContent, bool exactRecovery)
+template <typename Container>
+KeyValueStoreMemory<Container>::KeyValueStoreMemory(IDiskQueue* log, UID id, int64_t memoryLimit,
+                                                    KeyValueStoreType storeType, bool disableSnapshot,
+                                                    bool replaceContent, bool exactRecovery)
   : log(log), id(id), type(storeType), previousSnapshotEnd(-1), currentSnapshotEnd(-1), resetSnapshot(false),
     memoryLimit(memoryLimit), committedWriteBytes(0), overheadWriteBytes(0), committedDataSize(0), transactionSize(0),
     transactionIsLarge(false), disableSnapshot(disableSnapshot), replaceContent(replaceContent), snapshotCount(0),
@@ -713,13 +717,17 @@ IKeyValueStore* keyValueStoreMemory(std::string const& basename, UID logID, int6
 	TraceEvent("KVSMemOpening", logID)
 	    .detail("Basename", basename)
 	    .detail("MemoryLimit", memoryLimit)
-	    .detail("storeType", storeType);
+	    .detail("StoreType", storeType);
 
 	IDiskQueue* log = openDiskQueue(basename, ext, logID);
-	return new KeyValueStoreMemory(log, logID, memoryLimit, storeType, false, false, false);
+	if(storeType == KeyValueStoreType::MEMORY_RADIXTREE){
+		return new KeyValueStoreMemory<radix_tree>(log, logID, memoryLimit, storeType, false, false, false);
+	} else {
+		return new KeyValueStoreMemory<IKeyValueContainer>(log, logID, memoryLimit, storeType, false, false, false);
+	}
 }
 
 IKeyValueStore* keyValueStoreLogSystem( class IDiskQueue* queue, UID logID, int64_t memoryLimit, bool disableSnapshot, bool replaceContent, bool exactRecovery ) {
-	return new KeyValueStoreMemory(queue, logID, memoryLimit, KeyValueStoreType::MEMORY, disableSnapshot,
-	                               replaceContent, exactRecovery);
+	return new KeyValueStoreMemory<IKeyValueContainer>(queue, logID, memoryLimit, KeyValueStoreType::MEMORY,
+	                                                   disableSnapshot, replaceContent, exactRecovery);
 }

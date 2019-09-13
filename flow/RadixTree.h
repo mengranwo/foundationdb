@@ -36,6 +36,7 @@
 // forward declaration
 const int LEAF_BYTE = -1;
 const int INLINE_KEY_SIZE = sizeof(StringRef);
+struct KeyValueMapPair;
 
 StringRef radix_substr(const StringRef& key, int begin, int num) {
 	int size = key.size();
@@ -218,6 +219,12 @@ public:
 		return result;
 	}
 
+	// dummy method interface(to keep every interface same as IndexedSet )
+	static int getElementBytes() {
+        ASSERT(false);
+        return 0;
+	}
+
 	bool empty() const { return m_size == 0; }
 
 	void clear() {
@@ -232,15 +239,20 @@ public:
 	iterator find(const StringRef& key);
 	iterator begin();
     iterator end();
-    //modifications
+    // modifications
 	std::pair<iterator, bool> insert(const StringRef& key, const StringRef& val, bool replaceExisting = true);
+	int insert(const std::vector<std::pair<KeyValueMapPair, uint64_t>>& pairs, bool replaceExisting = true) {
+		// dummy method interface(to keep every interface same as IndexedSet )
+		ASSERT(false);
+		return 0;
+	}
 	void erase(iterator it);
 	void erase(iterator begin, iterator end);
 	// lookups
 	iterator lower_bound(const StringRef& key);
 	iterator upper_bound(const StringRef& key);
 	// access
-	uint64_t sum_to(iterator to);
+	uint64_t sumTo(iterator to);
 	iterator previous (iterator i);
 
 private:
@@ -665,12 +677,12 @@ radix_tree::iterator radix_tree::upper_bound(const StringRef& key, node* node) {
 }
 
 // Return the sum of getT(x) for begin()<=x<to
-uint64_t radix_tree::sum_to(iterator to) {
+uint64_t radix_tree::sumTo(iterator to) {
 	if(to == end()) {
         return m_root ? total_bytes : 0;
     }
     else {
-        throw std::invalid_argument("sum_to method only support end() input");
+        throw std::invalid_argument("sumTo method only support end() input");
     }
 }
 
