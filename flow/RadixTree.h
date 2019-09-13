@@ -36,7 +36,6 @@
 // forward declaration
 const int LEAF_BYTE = -1;
 const int INLINE_KEY_SIZE = sizeof(StringRef);
-struct KeyValueMapPair;
 
 StringRef radix_substr(const StringRef& key, int begin, int num) {
 	int size = key.size();

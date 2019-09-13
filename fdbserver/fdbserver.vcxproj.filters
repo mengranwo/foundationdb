@@ -106,7 +106,6 @@
       <Filter>workloads</Filter>
     </ActorCompiler>
     <ActorCompiler Include="KeyValueStoreMemory.actor.cpp" />
-    <ActorCompiler Include="KeyValueStoreRadixTree.actor.cpp" />
     <ActorCompiler Include="SimulatedCluster.actor.cpp" />
     <ActorCompiler Include="KeyValueStoreCompressTestData.actor.cpp" />
     <ActorCompiler Include="Coordination.actor.cpp" />

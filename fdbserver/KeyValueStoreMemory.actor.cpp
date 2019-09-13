@@ -54,6 +54,8 @@ public:
 	// IKeyValueStore
 	virtual KeyValueStoreType getType() { return type; }
 
+	virtual std::tuple<size_t, size_t, size_t> getSize() { return data.size(); }
+
 	int64_t getAvailableSize() {
 		int64_t residentSize = data.sumTo(data.end()) + queue.totalSize() + // doesn't account for overhead in queue
 		                       transactionSize;
