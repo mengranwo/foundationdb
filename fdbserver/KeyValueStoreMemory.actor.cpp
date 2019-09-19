@@ -215,24 +215,20 @@ public:
 		Standalone<VectorRef<KeyValueRef>> result;
 		if (rowLimit >= 0) {
 			auto it = data.lower_bound(keys.begin);
-			auto keyStart = it.getKey(reserved_buffer, 10000);
-			while (it != data.end() && keyStart < keys.end && rowLimit && byteLimit >= 0) {
-				byteLimit -= sizeof(KeyValueRef) + keyStart.size() + it.getValue().size();
-				result.push_back_deep(result.arena(), KeyValueRef(keyStart, it.getValue()));
+			while (it != data.end() && it.getKey(reserved_buffer, 10000) < keys.end && rowLimit && byteLimit >= 0) {
+				byteLimit -= sizeof(KeyValueRef) + it.getKey(reserved_buffer, 10000).size() + it.getValue().size();
+				result.push_back_deep(result.arena(), KeyValueRef(it.getKey(reserved_buffer, 10000), it.getValue()));
 				++it;
 				--rowLimit;
-				keyStart = it.getKey(reserved_buffer, 10000);
 			}
 		} else {
 			rowLimit = -rowLimit;
 			auto it = data.previous(data.lower_bound(keys.end));
-			auto keyStart = it.getKey(reserved_buffer, 10000);
-			while (it != data.end() && keyStart >= keys.begin && rowLimit && byteLimit >= 0) {
-				byteLimit -= sizeof(KeyValueRef) + keyStart.size() + it.getValue().size();
-				result.push_back_deep(result.arena(), KeyValueRef(keyStart, it.getValue()));
+			while (it != data.end() && it.getKey(reserved_buffer, 10000) >= keys.begin && rowLimit && byteLimit >= 0) {
+				byteLimit -= sizeof(KeyValueRef) + it.getKey(reserved_buffer, 10000).size() + it.getValue().size();
+				result.push_back_deep(result.arena(), KeyValueRef(it.getKey(reserved_buffer, 10000), it.getValue()));
 				it = data.previous(it);
 				--rowLimit;
-				keyStart = it.getKey(reserved_buffer, 10000);
 			}
 		}
 		return result;
@@ -587,9 +583,8 @@ private:
 		int count = 0;
 		int64_t snapshotSize = 0;
 		for (auto kv = snapshotData.begin(); kv != snapshotData.end(); ++kv) {
-			auto key = kv.getKey(reserved_buffer, 10000);
-			log_op(OpSnapshotItem, key, kv.getValue());
-			snapshotSize += key.size() + kv.getValue().size() + OP_DISK_OVERHEAD;
+			log_op(OpSnapshotItem, kv.getKey(reserved_buffer, 10000), kv.getValue());
+			snapshotSize += kv.getKey(reserved_buffer, 10000).size() + kv.getValue().size() + OP_DISK_OVERHEAD;
 			++count;
 		}
 
@@ -660,12 +655,11 @@ private:
 
 				snapshotTotalWrittenBytes += OP_DISK_OVERHEAD;
 			} else {
-				state KeyRef key = next.getKey(self->reserved_buffer, 10000);
-				self->log_op(OpSnapshotItem, key, next.getValue());
-				nextKey = key;
+				self->log_op(OpSnapshotItem, next.getKey(self->reserved_buffer, 10000), next.getValue());
+				nextKey = next.getKey(self->reserved_buffer, 10000);
 				nextKeyAfter = true;
 				snapItems++;
-				uint64_t opBytes = key.size() + next.getValue().size() + OP_DISK_OVERHEAD;
+				uint64_t opBytes = next.getKey(self->reserved_buffer, 10000).size() + next.getValue().size() + OP_DISK_OVERHEAD;
 				snapshotBytes += opBytes;
 				snapshotTotalWrittenBytes += opBytes;
 			}
