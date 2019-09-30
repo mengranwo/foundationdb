@@ -283,13 +283,12 @@ ACTOR Future<Void> testKVStoreMain( KVStoreTestWorkload* workload, KVTest* ptest
 	if (workload->doSetup) {
 		wr << Version(0);
 		wr.serializeBytes(extraValue, extraBytes);
-
 		printf("Building %d nodes: ", workload->nodeCount);
 		state double setupBegin = timer();
 		state double setupNow = now();
 		state Future<Void> lastCommit = Void();
 		state int i;
-        for(i=0; i<workload->nodeCount; i++) {
+		for(i=0; i<workload->nodeCount; i++) {
             test.store->set( KeyValueRef( test.makeKey( i ), test.makeKey( i )) ) ;
             if (!((i+1) % 10000) || i+1==workload->nodeCount) {
                 Void _ = wait( lastCommit );

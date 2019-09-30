@@ -43,11 +43,15 @@ public:
 	virtual void dispose() {
 		recovering.cancel();
 		log->dispose();
+		if (reserved_buffer != nullptr)
+		    delete reserved_buffer;
 		delete this;
 	}
 	virtual void close() {
 		recovering.cancel();
 		log->close();
+        if (reserved_buffer != nullptr)
+            delete reserved_buffer;
 		delete this;
 	}
 
