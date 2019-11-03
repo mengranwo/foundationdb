@@ -139,7 +139,7 @@ private:
 		uint32_t m_inline_length : 4;
 		// m_depth can be seen as common prefix length with your ancestors
 		uint32_t m_depth : 25;
-		// key is the suffix, a substring that is different from your ancestors
+		// key is the prefix, a substring that shared by your children
 		inlineUnion key;
 		// arena assign memory for key
 		Arena arena;
