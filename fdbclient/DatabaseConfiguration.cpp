@@ -271,7 +271,9 @@ StatusObject DatabaseConfiguration::toJSON(bool noPolicies) const {
 			result["storage_engine"] = "memory-1";
 		} else if( tLogDataStoreType == KeyValueStoreType::SSD_BTREE_V2 && storageServerStoreType == KeyValueStoreType::MEMORY ) {
 			result["storage_engine"] = "memory-2";
-		} else {
+		} else if( tLogDataStoreType == KeyValueStoreType::SSD_BTREE_V2 && storageServerStoreType == KeyValueStoreType::PMEM ) {
+            result["storage_engine"] = "pmem";
+        } else {
 			result["storage_engine"] = "custom";
 		}
 
@@ -411,8 +413,12 @@ bool DatabaseConfiguration::setInternal(KeyRef key, ValueRef value) {
 	}
 	else if (ck == LiteralStringRef("log_engine")) { parse((&type), value); tLogDataStoreType = (KeyValueStoreType::StoreType)type; 
 		// TODO:  Remove this once Redwood works as a log engine
-		if(tLogDataStoreType == KeyValueStoreType::SSD_REDWOOD_V1)
+		if(tLogDataStoreType == KeyValueStoreType::SSD_REDWOOD_V1) {
 			tLogDataStoreType = KeyValueStoreType::SSD_BTREE_V2;
+		}
+        if(tLogDataStoreType == KeyValueStoreType::PMEM) {
+            tLogDataStoreType = KeyValueStoreType::SSD_BTREE_V2;
+        }
 	}
 	else if (ck == LiteralStringRef("log_spill")) { parse((&type), value); tLogSpillType = (TLogSpillType::SpillType)type; }
 	else if (ck == LiteralStringRef("storage_engine")) { parse((&type), value); storageServerStoreType = (KeyValueStoreType::StoreType)type; }

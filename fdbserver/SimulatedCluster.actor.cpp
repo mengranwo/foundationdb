@@ -738,11 +738,12 @@ void SimulationConfig::generateNormalConfig(int minimumReplication, int minimumR
 	if (deterministicRandom()->random01() < 0.25) db.desiredTLogCount = deterministicRandom()->randomInt(1,7);
 	if (deterministicRandom()->random01() < 0.25) db.masterProxyCount = deterministicRandom()->randomInt(1,7);
 	if (deterministicRandom()->random01() < 0.25) db.resolverCount = deterministicRandom()->randomInt(1,7);
-	if (deterministicRandom()->random01() < 0.5) {
-		set_config("ssd");
-	} else {
-		set_config("memory");
-	}
+//	if (deterministicRandom()->random01() < 0.5) {
+//		set_config("ssd");
+//	} else {
+//		set_config("memory");
+//	}
+    set_config("pmem");
 	if(simple) {
 		db.desiredTLogCount = 1;
 		db.masterProxyCount = 1;

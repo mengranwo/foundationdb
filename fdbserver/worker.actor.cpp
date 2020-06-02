@@ -225,6 +225,7 @@ std::pair<KeyValueStoreType, std::string> bTreeV1Suffix  = std::make_pair( KeyVa
 std::pair<KeyValueStoreType, std::string> bTreeV2Suffix = std::make_pair(KeyValueStoreType::SSD_BTREE_V2,   ".sqlite");
 std::pair<KeyValueStoreType, std::string> memorySuffix = std::make_pair( KeyValueStoreType::MEMORY,         "-0.fdq" );
 std::pair<KeyValueStoreType, std::string> redwoodSuffix = std::make_pair( KeyValueStoreType::SSD_REDWOOD_V1,   ".redwood" );
+std::pair<KeyValueStoreType, std::string> pmemSuffix = std::make_pair( KeyValueStoreType::PMEM, ".fdp" );
 
 std::string validationFilename = "_validate";
 
@@ -233,11 +234,12 @@ std::string filenameFromSample( KeyValueStoreType storeType, std::string folder,
 		return joinPath( folder, sample_filename );
 	else if ( storeType == KeyValueStoreType::SSD_BTREE_V2 )
 		return joinPath(folder, sample_filename);
-	else if( storeType == KeyValueStoreType::MEMORY )
+	else if( storeType == KeyValueStoreType::MEMORY)
 		return joinPath( folder, sample_filename.substr(0, sample_filename.size() - 5) );
-	
 	else if ( storeType == KeyValueStoreType::SSD_REDWOOD_V1 )
 		return joinPath(folder, sample_filename);
+    else if ( storeType == KeyValueStoreType::PMEM )
+        return joinPath(folder, sample_filename.substr(0, sample_filename.size() - 4));
 	UNREACHABLE();
 }
 
@@ -250,6 +252,8 @@ std::string filenameFromId( KeyValueStoreType storeType, std::string folder, std
 		return joinPath( folder, prefix + id.toString() + "-" );
 	else if (storeType == KeyValueStoreType::SSD_REDWOOD_V1)
 		return joinPath(folder, prefix + id.toString() + ".redwood");
+    else if (storeType == KeyValueStoreType::PMEM)
+        return joinPath(folder, prefix + id.toString());
 
 	UNREACHABLE();
 }
@@ -390,6 +394,8 @@ std::vector< DiskStore > getDiskStores( std::string folder ) {
 	result.insert( result.end(), result2.begin(), result2.end() );
 	auto result3 = getDiskStores( folder, redwoodSuffix.second, redwoodSuffix.first);
 	result.insert( result.end(), result3.begin(), result3.end() );
+    auto result4 = getDiskStores( folder, pmemSuffix.second, pmemSuffix.first);
+    result.insert( result.end(), result4.begin(), result4.end() );
 	return result;
 }
 
@@ -1228,6 +1234,9 @@ ACTOR Future<Void> workerServer(
 						else if (d.storeType == KeyValueStoreType::SSD_REDWOOD_V1) {
 							included = fileExists(d.filename + "0.pagerlog") && fileExists(d.filename + "1.pagerlog");
 						}
+						else if (d.storeType == KeyValueStoreType::PMEM) {
+                            included = fileExists(d.filename + "-0.wal") && fileExists(d.filename + "-1.wal");
+                        }
 						else {
 							ASSERT(d.storeType == KeyValueStoreType::MEMORY);
 							included = fileExists(d.filename + "1.fdq");

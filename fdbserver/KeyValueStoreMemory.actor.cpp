@@ -345,8 +345,8 @@ private:
 
 	IndexedSet< KeyValueMapPair, uint64_t > data;
 
-	OpQueue queue; // mutations not yet commit()ted
-	IDiskQueue *log;
+    OpQueue queue;
+    IDiskQueue *log;
 	Future<Void> recovering, snapshotting;
 	int64_t committedWriteBytes;
 	int64_t overheadWriteBytes;
@@ -661,14 +661,13 @@ private:
 
 			if (next == self->data.end()) {
 				auto thisSnapshotEnd = self->log_op( OpSnapshotEnd, StringRef(), StringRef() );
-				//TraceEvent("SnapshotEnd", self->id)
-				//	.detail("LastKey", lastKey.present() ? lastKey.get() : LiteralStringRef("<none>"))
-				//	.detail("CurrentSnapshotEndLoc", self->currentSnapshotEnd)
-				//	.detail("PreviousSnapshotEndLoc", self->previousSnapshotEnd)
-				//	.detail("ThisSnapshotEnd", thisSnapshotEnd)
-				//	.detail("Items", snapItems)
-				//	.detail("CommittedWrites", self->notifiedCommittedWriteBytes.get())
-				//	.detail("SnapshotSize", snapshotBytes);
+				TraceEvent("SnapshotEnd", self->id)
+					.detail("CurrentSnapshotEndLoc", self->currentSnapshotEnd)
+					.detail("PreviousSnapshotEndLoc", self->previousSnapshotEnd)
+					.detail("ThisSnapshotEnd", thisSnapshotEnd)
+					.detail("Items", snapItems)
+					.detail("CommittedWrites", self->notifiedCommittedWriteBytes.get())
+					.detail("SnapshotSize", snapshotBytes);
 
 				ASSERT(thisSnapshotEnd >= self->currentSnapshotEnd);
 				self->previousSnapshotEnd = self->currentSnapshotEnd;
@@ -715,7 +714,9 @@ private:
 	}
 	ACTOR static Future<Void> commitAndUpdateVersions( KeyValueStoreMemory* self, Future<Void> commit, IDiskQueue::location location ) {
 		wait( commit );
+
 		self->log->pop(location);
+        std::cout << "commit is done, in memory storage engine" << std::endl;
 		return Void();
 	}
 };

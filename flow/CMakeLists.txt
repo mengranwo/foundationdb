@@ -41,6 +41,7 @@ set(FLOW_SRCS
   Net2Packet.h
   Platform.cpp
   Platform.h
+  PmemVector.h
   Profiler.actor.cpp
   Profiler.h
   SignalSafeUnwind.cpp

@@ -27,6 +27,7 @@ set(FDBSERVER_SRCS
   KeyValueStoreCompressTestData.actor.cpp
   KeyValueStoreMemory.actor.cpp
   KeyValueStoreSQLite.actor.cpp
+  KeyValueStorePmem.actor.cpp
   Knobs.cpp
   Knobs.h
   LatencyBandConfig.cpp
@@ -201,6 +202,7 @@ target_include_directories(fdbserver PRIVATE
   ${CMAKE_CURRENT_BINARY_DIR}/workloads
   ${CMAKE_CURRENT_SOURCE_DIR}/workloads)
 target_link_libraries(fdbserver PRIVATE fdbclient fdb_sqlite)
+target_link_libraries(fdbserver PRIVATE ${LIBPMEMOBJ++_LIBRARIES}) # TODO: control by flag in the future
 if (GPERFTOOLS_FOUND)
   add_compile_definitions(USE_GPERFTOOLS)
   target_link_libraries(fdbserver PRIVATE gperftools)

@@ -37,6 +37,7 @@
 #include <type_traits>
 #include <sstream>
 
+__asm__(".symver memcpy,memcpy@GLIBC_2.2.5");
 // TrackIt is a zero-size class for tracking constructions, destructions, and assignments of instances
 // of a class.  Just inherit TrackIt<T> from T to enable tracking of construction and destruction of
 // T, and use the TRACKIT_ASSIGN(rhs) macro in any operator= definitions to enable assignment tracking.
@@ -665,7 +666,7 @@ inline bool operator==(const StringRef& lhs, const StringRef& rhs) {
 	if (lhs.size() == 0 && rhs.size() == 0) {
 		return true;
 	}
-	return lhs.size() == rhs.size() && !memcmp(lhs.begin(), rhs.begin(), lhs.size());
+	return lhs.size() == rhs.size() && !memcmp(lhs.begin(), rhs.begin(), std::min(lhs.size(), rhs.size()));
 }
 inline bool operator<(const StringRef& lhs, const StringRef& rhs) {
 	if (std::min(lhs.size(), rhs.size()) > 0) {

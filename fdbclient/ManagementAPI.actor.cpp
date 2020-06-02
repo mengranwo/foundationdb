@@ -107,7 +107,10 @@ std::map<std::string, std::string> configForToken( std::string const& mode ) {
 	} else if (mode == "memory-1") {
 		logType = KeyValueStoreType::MEMORY;
 		storeType= KeyValueStoreType::MEMORY;
-	}
+	} else if (mode == "pmem") {
+        logType = KeyValueStoreType::SSD_BTREE_V2;
+        storeType= KeyValueStoreType::PMEM;
+    }
 	// Add any new store types to fdbserver/workloads/ConfigureDatabase, too
 
 	if (storeType.present()) {
