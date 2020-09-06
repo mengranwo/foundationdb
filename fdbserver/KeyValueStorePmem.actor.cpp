@@ -79,7 +79,9 @@ public:
 		                    std::max((int64_t)0, availableSize));
 	}
 
-	virtual void set(KeyValueRef keyValue, const Arena* arena) { queue.set(keyValue, arena); }
+	virtual void set(KeyValueRef keyValue, const Arena* arena) {
+		queue.set(keyValue, arena);
+	}
 
 	virtual void clear(KeyRangeRef range, const Arena* arena) { queue.clear(range, arena); }
 

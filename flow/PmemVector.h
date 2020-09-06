@@ -38,13 +38,6 @@ namespace pmem {
     namespace internal {
         using string_t = pmem::obj::experimental::inline_string;
         using kv_type_t = pmem::obj::experimental::radix_tree<string_t, string_t>;
-
-        struct kv_container {
-            /**
-             * Keys and values are stored inside the radix tree container.
-             */
-            kv_type_t store;
-        };
     } // namespace internal
 
     const std::string LAYOUT = "pmemkv";
@@ -68,7 +61,6 @@ namespace pmem {
 				    pop = pmem::obj::pool<Root>::open(path, LAYOUT);
 			    }
 
-			    root_oid = pop.root()->ptr.raw_ptr();
 			    pmpool = pop;
 		    }
 	    }
@@ -89,10 +81,9 @@ namespace pmem {
         };
 
         pmem::obj::pool_base pmpool;
-        PMEMoid *root_oid;
     };
 
-    class PmemVector : public IPmemStore<internal::kv_container> {
+    class PmemVector : public IPmemStore<internal::kv_type_t> {
 	public:
         using iterator = pmem::obj::experimental::radix_tree<internal::string_t, internal::string_t>::iterator;
 
@@ -118,6 +109,7 @@ namespace pmem {
         iterator upper_bound(const StringRef& key);
         // modifications
         std::pair<iterator, bool> insert(const StringRef& key, const StringRef& valuev, bool replaceExisting = true);
+        std::pair<iterator, bool> insert(const std::string& key, const std::string& valuev, bool replaceExisting = true);
         void erase(const StringRef& begin, const StringRef& end);
 	    // metadata
         int size() final; // total number of kv pairs
@@ -129,14 +121,8 @@ namespace pmem {
 		    return {(char *)(target.begin()), (size_t)target.size()};
 	    }
 	    // member variable
-        internal::kv_container *container;
+        internal::kv_type_t *container;
     };
-
-    // Helper method which throws an exception when called in a tx
-    static inline void check_outside_tx() {
-        if (pmemobj_tx_stage() != TX_STAGE_NONE)
-            throw transaction_scope_error("Function called inside transaction scope.");
-    }
 
     void PmemVector::init(const std::string path, int64_t size, bool forceCreate) {
 	    try {
@@ -149,52 +135,36 @@ namespace pmem {
     }
 
     int PmemVector::size() {
-        check_outside_tx();
-	    return container->store.size();
+	    return container->size();
     }
 
     PmemVector::iterator PmemVector::begin() {
-	    return container->store.begin();
+	    return container->begin();
     }
 
     PmemVector::iterator PmemVector::end() {
-	    return container->store.end();
+	    return container->end();
     }
 
     PmemVector::iterator PmemVector::find(const StringRef &key) {
-        check_outside_tx();
-	    return container->store.find(convert(key));
+	    return container->find(convert(key));
     }
 
     PmemVector::iterator PmemVector::lower_bound(const StringRef &key) {
-        check_outside_tx();
-	    return container->store.lower_bound(convert(key));
+	    return container->lower_bound(convert(key));
     }
 
     PmemVector::iterator PmemVector::upper_bound(const StringRef &key) {
-	    check_outside_tx();
-	    return container->store.upper_bound(convert(key));
+	    return container->upper_bound(convert(key));
     }
 
     std::pair<PmemVector::iterator, bool> PmemVector::insert(const StringRef& key, const StringRef& value, bool replaceExisting) {
 	    try {
-		    check_outside_tx();
-            std::pair<PmemVector::iterator, bool> result;
+            auto ret = container->try_emplace(convert(key), convert(value));
+            if (!ret.second && replaceExisting)
+                ret.first.assign_val(convert(value));
 
-		    pmem::obj::transaction::run(pmpool, [&] {
-			    auto it = container->store.find(convert(key));
-                bool replaced = false;
-			    if (it != end()) {
-                    if (replaceExisting) {
-					    it.assign_val(convert(value));
-					    replaced = true;
-				    }
-                    result = std::make_pair(it, replaced);
-			    } else {
-                    result = container->store.emplace(convert(key), convert(value));
-			    }
-		    });
-		    return result;
+            return ret;
 	    } catch (pmem::transaction_scope_error& e) {
 		    Error err = internal_error();
 		    TraceEvent(SevError, "ErrorInsertIntoPmem").error(err).detail("ErrorMsg", e.what());
@@ -208,11 +178,10 @@ namespace pmem {
 
     void PmemVector::erase(const StringRef& lo, const StringRef& hi) {
 	    try {
-		    check_outside_tx();
 		    // remove [first, last)
-		    auto first = container->store.lower_bound(convert(lo));
-		    auto last = container->store.lower_bound(convert(hi));
-		    container->store.erase(first, last);
+		    auto first = container->lower_bound(convert(lo));
+		    auto last = container->lower_bound(convert(hi));
+		    container->erase(first, last);
 	    } catch (pmem::transaction_scope_error& e) {
             Error err = internal_error();
             TraceEvent(SevError, "ErrorEraseFromPmem").error(err).detail("ErrorMsg", e.what());
@@ -225,13 +194,13 @@ namespace pmem {
     }
 
     void PmemVector::recover() {
-        if (!OID_IS_NULL(*root_oid)) {
-            container = (internal::kv_container *)pmemobj_direct(*root_oid);
+        if (pmpool.handle() != nullptr) {
+		    container = (internal::kv_type_t *)
+                pmemobj_direct(pmemobj_root(pmpool.handle(), sizeof(internal::kv_type_t)));
         } else {
             pmem::obj::transaction::run(pmpool, [&] {
-                pmem::obj::transaction::snapshot(root_oid);
-                *root_oid = pmem::obj::make_persistent<internal::kv_container>().raw();
-                container = (internal::kv_container *)pmemobj_direct(*root_oid);
+                container = (internal::kv_type_t *)
+			        pmemobj_direct(pmem::obj::make_persistent<internal::kv_type_t>().raw());
             });
         }
     }

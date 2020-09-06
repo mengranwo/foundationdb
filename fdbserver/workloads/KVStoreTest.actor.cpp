@@ -375,7 +375,7 @@ ACTOR Future<Void> testKVStoreMain(KVStoreTestWorkload* workload, KVTest* ptest)
 		for (i = workload->nodeCount - chunk; i < workload->nodeCount; i++) {
 			Optional<Value> result = wait(test.store->readValue(test.makeKey(i)));
 			if (result.present()) {
-				ASSERT(result.get() == StringRef(std::to_string(i)));
+				ASSERT(result.get() == test.makeKey(i));
 			} else {
 				ASSERT(false);
 			}
