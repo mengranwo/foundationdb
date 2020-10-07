@@ -97,7 +97,7 @@ public:
         auto it = self->data.find(key);
         if (it == self->data.end()) return Optional<Value>();
 
-        StringRef val((uint8_t *)(it->value().data()), it->value().size());
+        StringRef val(it->value().data(), it->value().size());
         return Optional<Value>(val);
     }
 
@@ -112,11 +112,10 @@ public:
         auto it = self->data.find(key);
         if (it == self->data.end()) return Optional<Value>();
 
-        StringRef val((uint8_t *)(it->value().data()), it->value().size());
+        StringRef val(it->value().data(), it->value().size());
         if(maxLength < val.size()) {
             return Optional<Value>(val.substr(0, maxLength));
-        }
-        else {
+        } else {
             return Optional<Value>(val);
         }
     }
@@ -139,8 +138,8 @@ public:
 		if (rowLimit > 0) {
 			auto it = self->data.lower_bound(keys.begin);
 			while (it != self->data.end() && it->key() < keys.end && rowLimit && byteLimit > 0) {
-				StringRef key((uint8_t *)(it->key().data()), it->key().size());
-                StringRef value((uint8_t *)(it->value().data()), it->value().size());
+				StringRef key(it->key().data(), it->key().size());
+                StringRef value(it->value().data(), it->value().size());
 
 				byteLimit -= sizeof(KeyValueRef) + key.size() + value.size();
 				result.push_back_deep(result.arena(), KeyValueRef(key, value));
@@ -152,8 +151,8 @@ public:
 			auto it = self->data.lower_bound(keys.end);
 			--it; // exclusive on the end
 			while (it != self->data.end() && it->key() >= keys.begin && rowLimit && byteLimit > 0) {
-                StringRef key((uint8_t *)(it->key().data()), it->key().size());
-                StringRef value((uint8_t *)(it->value().data()), it->value().size());
+                StringRef key(it->key().data(), it->key().size());
+                StringRef value(it->value().data(), it->value().size());
 
 				byteLimit -= sizeof(KeyValueRef) + key.size() + value.size();
 				result.push_back_deep(result.arena(), KeyValueRef(key, value));

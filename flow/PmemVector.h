@@ -36,7 +36,7 @@
 
 namespace pmem {
     namespace internal {
-        using string_t = pmem::obj::experimental::inline_string;
+        using string_t = pmem::obj::experimental::basic_inline_string<uint8_t>;
         using kv_type_t = pmem::obj::experimental::radix_tree<string_t, string_t>;
     } // namespace internal
 
@@ -117,8 +117,8 @@ namespace pmem {
 	    iterator end();
 	private:
         void recover();
-        static pmem::obj::string_view convert(const StringRef &target) {
-		    return {(char *)(target.begin()), (size_t)target.size()};
+        static pmem::obj::basic_string_view<uint8_t> convert(const StringRef &target) {
+		    return {target.begin(), (size_t)target.size()};
 	    }
 	    // member variable
         internal::kv_type_t *container;
@@ -160,11 +160,11 @@ namespace pmem {
 
     std::pair<PmemVector::iterator, bool> PmemVector::insert(const StringRef& key, const StringRef& value, bool replaceExisting) {
 	    try {
-            auto ret = container->try_emplace(convert(key), convert(value));
-            if (!ret.second && replaceExisting)
-                ret.first.assign_val(convert(value));
-
-            return ret;
+		    auto ret = container->try_emplace(convert(key), convert(value));
+		    if (!ret.second && replaceExisting) {
+			    ret.first.assign_val(convert(value));
+		    }
+		    return ret;
 	    } catch (pmem::transaction_scope_error& e) {
 		    Error err = internal_error();
 		    TraceEvent(SevError, "ErrorInsertIntoPmem").error(err).detail("ErrorMsg", e.what());
