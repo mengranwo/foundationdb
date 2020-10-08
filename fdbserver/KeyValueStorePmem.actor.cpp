@@ -325,7 +325,6 @@ private:
                 .detail("Details", count);
         }
 		ops.clear();
-        std::cout << "commit queue "<< count << std::endl;
         return total;
     }
 
@@ -337,14 +336,13 @@ private:
 			wait(commit);
 
 			self->commit_queue(tempQueue);
-			auto thisCheckpointEnd = self->log_op(OpSnapshotEnd, StringRef(), StringRef());
 
 			ASSERT(thisCheckpointEnd >= self->currentCheckpointEnd);
 			self->previousCheckpointEnd = self->currentCheckpointEnd;
 			self->currentCheckpointEnd = thisCheckpointEnd;
 			self->log->pop(self->previousCheckpointEnd);
 			self->transactionSize = 0;
-			std::cout << "commit is done, in pmem storage engine " << self->data.size() << std::endl;
+//			std::cout << "commit is done, in pmem storage engine " << self->data.size() << std::endl;
 			return Void();
 		} catch (Error& e) {
 			if (e.code() != error_code_actor_cancelled && self->error.canBeSet()) {
@@ -481,7 +479,7 @@ private:
                     .detail("TimeTaken", now()-startt)
 				    .detail("KVStoreSize", self->data.size());
 
-				std::cout << "recover is over " << self->data.size() << std::endl;
+//				std::cout << "recover is over " << self->data.size() << std::endl;
                 return Void();
             } catch( Error &e ) {
                 bool ok = e.code() == error_code_operation_cancelled || e.code() == error_code_file_not_found || e.code() == error_code_disk_adapter_reset;
@@ -538,5 +536,6 @@ KeyValueStorePmem::KeyValueStorePmem(std::string const& basename, UID id, int64_
 
 IKeyValueStore* keyValueStorePmem(std::string const& basename, UID logID, int64_t sizeLimit, std::string ext) {
 	TraceEvent("KVSPmemOpening", logID).detail("Basename", basename).detail("FileExtension", ext).detail("SizeLimit", sizeLimit);
+    std::cout << "KVSPmemOpening, size limit " << sizeLimit << std::endl;
 	return new KeyValueStorePmem(basename, logID, sizeLimit, ext);
 }
