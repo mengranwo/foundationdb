@@ -336,6 +336,7 @@ private:
 			wait(commit);
 
 			self->commit_queue(tempQueue);
+            auto thisCheckpointEnd = self->log_op(OpSnapshotEnd, StringRef(), StringRef());
 
 			ASSERT(thisCheckpointEnd >= self->currentCheckpointEnd);
 			self->previousCheckpointEnd = self->currentCheckpointEnd;

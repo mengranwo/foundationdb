@@ -56,7 +56,7 @@ namespace pmem {
 		    } else {
 			    pmem::obj::pool<Root> pop;
 			    if (forceCreate) {
-				    pop = pmem::obj::pool<Root>::create(path, LAYOUT, size, S_IRWXU);
+				    pop = pmem::obj::pool<Root>::create(path, LAYOUT, size, S_IWUSR | S_IRUSR);
 			    } else {
 				    pop = pmem::obj::pool<Root>::open(path, LAYOUT);
 			    }

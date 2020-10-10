@@ -19,7 +19,7 @@
  */
 
 #include "fdbserver/IKeyValueStore.h"
-#include "fdbserver/IDiskQueue.h"featureDisabledStatusCode
+#include "fdbserver/IDiskQueue.h"
 #include "flow/IndexedSet.h"
 #include "flow/ActorCollection.h"
 #include "fdbclient/Notified.h"
